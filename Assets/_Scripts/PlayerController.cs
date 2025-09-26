@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class PlayerController : MonoBehaviour
@@ -6,211 +7,219 @@ public class PlayerController : MonoBehaviour
     private enum PlayerState { Idle, Grabbing, Swaying, Launched }
     private PlayerState currentState = PlayerState.Idle;
 
-    [Header("必須コンポーレント")]
+    [Header("必須コンポーネント")]
     public Transform handPoint;
 
-    [Header("移動設定")]
-    public float moveSpeed = 3.0f;
+    [Header("スイングアクション設定")]
+    [Tooltip("Joy-Conの傾き角度がスイングの力に与える影響の大きさ")]
+    public float swayForceByAngle = 20f;
+    [Tooltip("Joy-Conを振る速さがパワーの蓄積に与える影響の大きさ")]
+    public float swayForceByVelocity = 0.1f;
+    [Tooltip("パワーが蓄積する基本レート")]
+    public float swayIncreaseRate = 10f;
+    [Tooltip("パワーが自然に減少していくレート")]
+    public float swayDecayRate = 5f;
+    [Tooltip("蓄積できるパワーの最大値")]
+    public float maxSwayPower = 100f;
+    [Tooltip("パワーを発射の力に変換する際の倍率")]
+    public float launchMultiplier = 50f;
+    [Tooltip("スイング成功と判定されるJoy-Conの回転速度のしきい値")]
+    public float swingVelocityThreshold = 15f;
+    [Tooltip("溜まったパワーがスイングの見た目の大きさに影響を与える度合い")]
+    public float powerToSwingMultiplier = 0.1f;
 
-    [Header("入力感度設定")]
-    [Tooltip("バランスボードの入力が、この値より大きくならないとスイングとして認識されません")]
-    public float swingDeadzone = 0.05f;
+    [Header("スイング角度設定")]
+    [Tooltip("左スイングと認識される最大角度")]
+    public float leftSwingAngleMax = 90f;
+    [Tooltip("左スイングと認識される最小角度")]
+    public float leftSwingAngleMin = 150f;
+    [Tooltip("右スイングと認識される最小角度")]
+    public float rightSwingAngleMin = 210f;
+    [Tooltip("右スイングと認識される最大角度")]
+    public float rightSwingAngleMax = 270f;
 
-    [Header("つり革アクション設定")]
-    public float swayTorque = 10.0f;
-    public float swayIncreaseRate = 5.0f;
-    public float swayDecayRate = 10.0f;
-    public float maxSwayPower = 100.0f;
-    public float launchMultiplier = 30.0f;
+    [Header("バランス調整")]
+    [Tooltip("掴める最大距離")]
     public float maxGrabDistance = 8.0f;
+    [Tooltip("空中で再掴みした際に、既存の速度をどのくらい減衰させるか (0.5 = 50%に)")]
+    [Range(0f, 1f)]
+    public float aerialRecatchDampener = 0.5f;
+    [Tooltip("発射後、体をまっすぐに戻すのにかかる時間")]
+    public float straightenDuration = 0.5f;
 
     [Header("NPCインタラクション設定")]
     public float knockbackMultiplier = 5.0f;
 
-    [Header("ジャンプ制御")]
-    public float straightenDuration = 0.5f;
-
+    // --- 内部変数 ---
     private Rigidbody2D rb;
     private float swayPower = 0f;
     private HangingStrap currentStrap = null;
     private HingeJoint2D activeHingeJoint;
     private Coroutine straighteningCoroutine;
-    private bool wasSwayingLastFrame = false;
+    private float lastYaw = 0f;
+
+    // --- Joy-Con関連の内部変数 ---
+    private List<Joycon> joycons;
+    private Joycon joycon;
+
 
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
-        if (handPoint == null) { Debug.LogError("HandPointが設定されていません！"); }
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+
+        // Joy-Conのセットアップ
+        joycons = JoyconManager.instance.j;
+        if (joycons.Count > 0)
+        {
+            joycon = joycons[0];
+        }
     }
 
     void Update()
     {
-        switch (currentState)
+        // アイドル中、または発射中にスペースキーが押されたら掴む
+        if (currentState == PlayerState.Idle || currentState == PlayerState.Launched)
         {
-            case PlayerState.Idle: HandleIdleInput(); break;
-            case PlayerState.Grabbing:
-            case PlayerState.Swaying: HandleHangingInput(); break;
-            // ▼▼▼ 修正箇所：Launched状態でも入力を受け付けるように変更 ▼▼▼
-            case PlayerState.Launched: HandleLaunchedInput(); break;
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                GrabNearestStrap();
+            }
+        }
+        // 掴んでいる最中にスペースキーが離されたら発射
+        else if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
+        {
+            if (Input.GetKeyUp(KeyCode.Space))
+            {
+                ReleaseStrap();
+            }
         }
     }
 
     void FixedUpdate()
     {
-        if (currentState == PlayerState.Idle)
+        // 掴んでいる時だけスイングの物理処理を実行
+        if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
         {
-            ExecuteIdleMovement();
+            ExecuteSwayingPhysics();
         }
+
+        // パワーは常に自然減少していく
+        swayPower = Mathf.Max(0, swayPower - swayDecayRate * Time.fixedDeltaTime);
     }
 
-    private void HandleIdleInput()
+    private void ExecuteSwayingPhysics()
     {
-        if (Input.GetKeyDown(KeyCode.Space)) { GrabNearestStrap(); }
-    }
+        if (joycon == null) return;
 
-    // ▼▼▼ 新規追加：Launched状態での入力処理メソッド ▼▼▼
-    private void HandleLaunchedInput()
-    {
-        // 空中にいるときにスペースキーが押されたら、再掴みを試みる
-        if (Input.GetKeyDown(KeyCode.Space))
-        {
-            GrabNearestStrap();
-        }
-    }
+        // --- 1. Joy-Conから現在の角度と角速度を取得 ---
+        Quaternion orientation = joycon.GetVector();
+        Vector3 eulerAngles = orientation.eulerAngles;
+        float currentYaw = eulerAngles.y;
 
-    private void HandleHangingInput()
-    {
-        // A/Dキーと矢印キーを同等に扱うように修正
-        float horizontalInput;
-        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+        // 前フレームとの差から角速度を計算 (360度の境界をまたいでも正しく計算する)
+        float yawVelocity = Mathf.DeltaAngle(lastYaw, currentYaw) / Time.fixedDeltaTime;
+        lastYaw = currentYaw;
+
+        // --- 2. 角度に基づいて、現在のフレームでかけるべき力の方向を計算 ---
+        float normalizedForce = 0f;
+        if (currentYaw > rightSwingAngleMin && currentYaw < rightSwingAngleMax)
         {
-            horizontalInput = 1.0f;
+            // 210度で0、270度で1になるように正規化
+            normalizedForce = Mathf.InverseLerp(rightSwingAngleMin, rightSwingAngleMax, currentYaw);
+            currentState = PlayerState.Swaying;
         }
-        else if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+        else if (currentYaw > leftSwingAngleMax && currentYaw < leftSwingAngleMin)
         {
-            horizontalInput = -1.0f;
+            // 150度で0、90度で-1になるように正規化 (-1は左方向の力)
+            normalizedForce = -Mathf.InverseLerp(leftSwingAngleMin, leftSwingAngleMax, currentYaw);
+            currentState = PlayerState.Swaying;
         }
         else
         {
-            // キーボード入力がない場合のみ、バランスボード等のアナログ入力を受け付ける
-            horizontalInput = Input.GetAxis("Horizontal");
+            currentState = PlayerState.Grabbing; // デッドゾーンにいる
         }
 
-        bool isSwayingThisFrame = Mathf.Abs(horizontalInput) > swingDeadzone;
+        // --- 3. タイミングが良いか判定し、良ければパワーを蓄積 & トルクをかける ---
+        // 判定基準を「キャラクターの回転速度」から「Joy-Conを振る速さ」に変更
+        bool isTimingGood = (yawVelocity > swingVelocityThreshold && normalizedForce > 0) || // Joy-Conを素早く右に振っている
+                            (yawVelocity < -swingVelocityThreshold && normalizedForce < 0);  // Joy-Conを素早く左に振っている
 
-        // --- スイングのコアロジック（可読性向上版） ---
-        bool shouldAccelerate = (rb.angularVelocity > 0.1f && horizontalInput > 0) ||
-                                (rb.angularVelocity < -0.1f && horizontalInput < 0);
-        bool isNewSwayInput = isSwayingThisFrame && !wasSwayingLastFrame;
-        if (shouldAccelerate && isNewSwayInput)
+        if (isTimingGood)
         {
-            rb.AddTorque(Mathf.Sign(horizontalInput) * swayTorque, ForceMode2D.Impulse);
-            swayPower += swayIncreaseRate;
-            Debug.Log("加速成功！ 現在のパワー: " + swayPower);
-        }
-        
-        swayPower -= swayDecayRate * Time.deltaTime;
-        swayPower = Mathf.Clamp(swayPower, 0, maxSwayPower);
-        currentState = isSwayingThisFrame ? PlayerState.Swaying : PlayerState.Grabbing;
-        wasSwayingLastFrame = isSwayingThisFrame;
-        
-        // --- デバッグ用の入力処理 ---
-        if (Input.GetKeyUp(KeyCode.Space))
-        {
-            if (Input.GetKey(KeyCode.LeftShift))
-            {
-                Debug.Log("デバッグ：最大パワーで発射！");
-                ReleaseStrap(maxSwayPower);
-            }
-            else
-            {
-                ReleaseStrap(swayPower);
-            }
-        }
-        if (Input.GetKeyDown(KeyCode.LeftControl))
-        {
-            Debug.Log("デバッグ：ゼロパワーで落下");
-            ReleaseStrap(0f);
+            // パワーの蓄積（角度の深さと振りの速さの両方を考慮）
+            float powerIncrease = (Mathf.Abs(normalizedForce) + Mathf.Abs(yawVelocity) * swayForceByVelocity)
+                                * swayIncreaseRate
+                                * Time.fixedDeltaTime;
+            swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
+
+            // パワーが増加した瞬間にログを出力
+            Debug.Log($"<color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
+
+            // パワーが溜まっているほど、スイングの力が強くなるように計算
+            float totalTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
+            rb.AddTorque(totalTorque);
         }
     }
 
+    // アイドル時の移動はできなくなったので、このメソッドは空にする
     private void ExecuteIdleMovement()
     {
-        float moveHorizontal;
-        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
-        {
-            moveHorizontal = 1.0f;
-        }
-        else if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
-        {
-            moveHorizontal = -1.0f;
-        }
-        else
-        {
-            moveHorizontal = Input.GetAxis("Horizontal");
-        }
-        rb.velocity = new Vector2(moveHorizontal * moveSpeed, rb.velocity.y);
+        // 何もしない
     }
 
-    // ▼▼▼ 修正箇所：空中での再掴みに対応 ▼▼▼
     private void GrabNearestStrap()
     {
-        // 地上のアイドル状態から掴む場合のみ、プレイヤーの動きを止める
-        if (currentState == PlayerState.Idle)
-        {
-            rb.velocity = Vector2.zero;
-        }
-        
         HangingStrap nearestStrap = HangingStrapManager.FindNearestStrap(transform.position, maxGrabDistance);
         if (nearestStrap != null)
         {
-            // 空中(Launched)から掴む場合、姿勢制御を中断する
+            // 空中(Launched)から再掴みした場合、既存の速度を減衰させて無限加速を防ぐ
             if (currentState == PlayerState.Launched)
             {
-                if (straighteningCoroutine != null)
-                {
-                    StopCoroutine(straighteningCoroutine);
-                    straighteningCoroutine = null;
-                }
-                rb.rotation = 0f; // 掴む瞬間の角度をリセット
+                if (straighteningCoroutine != null) StopCoroutine(straighteningCoroutine);
+                rb.velocity *= aerialRecatchDampener;
             }
 
             currentState = PlayerState.Grabbing;
             currentStrap = nearestStrap;
-            rb.constraints = RigidbodyConstraints2D.None;
+            rb.constraints = RigidbodyConstraints2D.None; // 回転を許可
 
             activeHingeJoint = gameObject.AddComponent<HingeJoint2D>();
             activeHingeJoint.connectedBody = currentStrap.GetComponent<Rigidbody2D>();
             activeHingeJoint.autoConfigureConnectedAnchor = false;
             activeHingeJoint.anchor = transform.InverseTransformPoint(handPoint.position);
             activeHingeJoint.connectedAnchor = currentStrap.grabPoint.localPosition;
+
+            // 掴んだ瞬間のヨー角を初期値として記録
+            if (joycon != null)
+            {
+                lastYaw = joycon.GetVector().eulerAngles.y;
+            }
         }
     }
 
-    private void ReleaseStrap(float currentSwayPower)
+    private void ReleaseStrap()
     {
         if (currentState == PlayerState.Idle || currentState == PlayerState.Launched) return;
-        
-        Debug.Log("発射！ パワー: " + currentSwayPower + ", 倍率: " + launchMultiplier);
+
+        // 発射する瞬間に、使用したパワーをログに出力
+        Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");
+
         currentState = PlayerState.Launched;
         Destroy(activeHingeJoint);
-        rb.constraints = RigidbodyConstraints2D.None;
+        rb.constraints = RigidbodyConstraints2D.None; // 念のため
 
-        Vector2 currentVelocity = rb.velocity;
-        float launchDirection = Mathf.Sign(currentVelocity.x);
-        if (Mathf.Approximately(launchDirection, 0)) { launchDirection = 1; }
-        
-        if (currentSwayPower > 0)
-        {
-            Vector2 launchBoost = new Vector2(launchDirection, 1.0f).normalized * currentSwayPower * launchMultiplier;
-            rb.AddForce(launchBoost, ForceMode2D.Impulse);
-        }
+        // 蓄積したパワーと現在の速度に基づいて発射力を計算
+        Vector2 currentVelocity = rb.velocity.normalized;
+        if (currentVelocity.sqrMagnitude < 0.1f) { currentVelocity = Vector2.up; } // ほぼ静止していたら上向きに
 
-        swayPower = 0f;
+        Vector2 launchBoost = currentVelocity * swayPower * launchMultiplier;
+        rb.AddForce(launchBoost, ForceMode2D.Impulse);
+
+        swayPower = 0f; // パワーをリセット
         currentStrap = null;
-        wasSwayingLastFrame = false;
 
+        // 発射後に体をまっすぐに戻すコルーチンを開始
         if (straighteningCoroutine != null) StopCoroutine(straighteningCoroutine);
         straighteningCoroutine = StartCoroutine(StraightenUpInAir());
     }
@@ -218,18 +227,16 @@ public class PlayerController : MonoBehaviour
     private IEnumerator StraightenUpInAir()
     {
         float startRotation = rb.rotation;
-        float endRotation = 0f;
         float elapsedTime = 0f;
 
         while (elapsedTime < straightenDuration)
         {
-            if (currentState != PlayerState.Launched) yield break;
+            if (currentState != PlayerState.Launched) yield break; // もし着地などしたら中断
             elapsedTime += Time.deltaTime;
-            float t = elapsedTime / straightenDuration;
-            rb.rotation = Mathf.LerpAngle(startRotation, endRotation, t);
+            rb.rotation = Mathf.LerpAngle(startRotation, 0f, elapsedTime / straightenDuration);
             yield return null;
         }
-        rb.rotation = 0f;
+        if (currentState == PlayerState.Launched) rb.rotation = 0f;
     }
 
     void OnCollisionEnter2D(Collision2D collision)
@@ -237,7 +244,7 @@ public class PlayerController : MonoBehaviour
         if (collision.gameObject.CompareTag("NPC"))
         {
             NPCController npc = collision.gameObject.GetComponent<NPCController>();
-            if (npc != null && (currentState == PlayerState.Launched || currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying))
+            if (npc != null && (currentState == PlayerState.Launched || currentState == PlayerState.Swaying))
             {
                 npc.TakeImpact(rb.velocity, knockbackMultiplier);
             }
@@ -246,13 +253,9 @@ public class PlayerController : MonoBehaviour
         if (currentState == PlayerState.Launched && collision.gameObject.CompareTag("Ground"))
         {
             currentState = PlayerState.Idle;
-            if (straighteningCoroutine != null)
-            {
-                StopCoroutine(straighteningCoroutine);
-                straighteningCoroutine = null;
-            }
+            if (straighteningCoroutine != null) StopCoroutine(straighteningCoroutine);
             rb.rotation = 0f;
-            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+            rb.constraints = RigidbodyConstraints2D.FreezeRotation; // 地面に着いたら回転を禁止
         }
     }
 }
