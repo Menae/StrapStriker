@@ -2741,10 +2741,10 @@ MonoBehaviour:
   launchMultiplier: 1
   swingVelocityThreshold: 15
   powerToSwingMultiplier: 1.3
-  leftSwingAngleMax: 90
-  leftSwingAngleMin: 150
-  rightSwingAngleMin: 210
-  rightSwingAngleMax: 270
+  leftSwingAngleMax: 120
+  leftSwingAngleMin: 170
+  rightSwingAngleMin: 190
+  rightSwingAngleMax: 240
   maxGrabDistance: 8
   aerialRecatchDampener: 0.5
   straightenDuration: 1
@@ -3918,7 +3918,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   activationRadius: 50
   checkInterval: 0.5
-  initialNpcCount: 15
+  initialNpcCount: 1
+  playerSafeRadius: 1
   spawnAreaCenter: {x: 0, y: 0}
   spawnAreaSize: {x: 40, y: 5}
 --- !u!4 &1622307978
@@ -5565,7 +5566,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   npcPrefab: {fileID: 5363203148503248907, guid: 0e09a97884d6535488158da25264b9a0, type: 3}
-  poolSize: 20
+  poolSize: 5
 --- !u!4 &2050382194
 Transform:
   m_ObjectHideFlags: 0
@@ -5830,7 +5831,7 @@ SceneRoots:
   - {fileID: 2050382194}
   - {fileID: 1622307978}
   - {fileID: 1217170927}
-  - {fileID: 1708622513}
   - {fileID: 343372527}
+  - {fileID: 1708622513}
   - {fileID: 1787355313}
   - {fileID: 944620619}

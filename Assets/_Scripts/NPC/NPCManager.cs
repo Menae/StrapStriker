@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 public class NPCManager : MonoBehaviour
@@ -15,6 +15,8 @@ public class NPCManager : MonoBehaviour
     [Header("スポーン設定")]
     [Tooltip("最初にスポーンさせるNPCの数")]
     public int initialNpcCount = 100;
+    [Tooltip("スポーン時にプレイヤーから最低限確保する距離")]
+    public float playerSafeRadius = 5f;
 
     [Header("スポーン範囲設定")]
     [Tooltip("NPCがスポーンするエリアの中心座標")]
@@ -47,7 +49,7 @@ public class NPCManager : MonoBehaviour
         InvokeRepeating(nameof(UpdateNpcStates), 0f, checkInterval);
 
         // Inspectorで設定した数の初期NPCをスポーンさせる
-        SpawnInitialNPCs(initialNpcCount); // ★★★ 修正箇所 ★★★
+        SpawnInitialNPCs(initialNpcCount);
     }
 
     // 指定された数のNPCをランダムな位置にスポーンさせるメソッド
@@ -63,7 +65,13 @@ public class NPCManager : MonoBehaviour
             float minY = spawnAreaCenter.y - spawnAreaSize.y / 2;
             float maxY = spawnAreaCenter.y + spawnAreaSize.y / 2;
 
-            Vector2 randomPosition = new Vector2(Random.Range(minX, maxX), Random.Range(minY, maxY));
+            Vector2 randomPosition;
+            // 生成した座標がプレイヤーのセーフゾーン内だったら、座標を再抽選する
+            do
+            {
+                randomPosition = new Vector2(Random.Range(minX, maxX), Random.Range(minY, maxY));
+            } while (Vector2.Distance(randomPosition, playerTransform.position) < playerSafeRadius);
+
             npcObject.transform.position = randomPosition;
 
             // 管理リストに追加

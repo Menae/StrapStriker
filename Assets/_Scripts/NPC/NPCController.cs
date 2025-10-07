@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using UnityEngine;
 
 public class NPCController : MonoBehaviour
@@ -16,7 +16,7 @@ public class NPCController : MonoBehaviour
     public float recoveryTime = 3.0f;       // ダウンしてから起き上がるまでの時間
 
     [Header("自己復帰設定")]
-    [Tooltip("この角度以上傾くと『転倒』と見なす")]
+    [Tooltip("この角度以上傾くと転倒と見なす")]
     public float tiltAngleThreshold = 30f;
     [Tooltip("転倒してから自動で起き上がるまでの時間")]
     public float selfRightingTime = 2.0f;
@@ -78,7 +78,7 @@ public class NPCController : MonoBehaviour
 
         rb.simulated = true; // Rigidbodyの物理シミュレーションを開始
         this.enabled = true;   // このスクリプトのUpdateなどを有効化
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation; // ★★★ 追加: 最初は回転を固定
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation; // 追加: 最初は回転を固定
     }
 
     // NPCをスリープさせるメソッド(Managerから呼ばれる)
@@ -105,7 +105,7 @@ public class NPCController : MonoBehaviour
 
         if (forceToApply.magnitude > knockdownThreshold)
         {
-            rb.constraints = RigidbodyConstraints2D.None; // ★★★ 追加: ダウンする瞬間に回転の固定を解除
+            rb.constraints = RigidbodyConstraints2D.None; // ダウンする瞬間に回転の固定を解除
             tiltedTimer = 0f; // 念のためタイマーをリセット
             StartCoroutine(KnockdownRoutine());
         }
@@ -122,7 +122,7 @@ public class NPCController : MonoBehaviour
         rb.rotation = 0f;
         rb.angularVelocity = 0f;
         rb.velocity = Vector2.zero;
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation; // ★★★ 追加: 起き上がったら再び回転を固定
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation; // 起き上がったら再び回転を固定
 
         currentState = NPCState.Idle;
         Debug.Log("NPCが起き上がった!, Frame: " + Time.frameCount);
@@ -148,6 +148,6 @@ public class NPCController : MonoBehaviour
             yield return null;
         }
         rb.rotation = 0f; // 最後にきっちり0度にする
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation; // ★★★ 追加: 起き上がったら再び回転を固定
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation; // 起き上がったら再び回転を固定
     }
 }
