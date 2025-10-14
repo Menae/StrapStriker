@@ -54,6 +54,9 @@ public class PlayerController : MonoBehaviour
     [Header("NPCインタラクション設定")]
     public float knockbackMultiplier = 5.0f;
 
+    [Header("デバッグ用")]
+    [SerializeField] private bool debugMode = false;
+
     // --- 内部変数 ---
     private Rigidbody2D rb;
     private float swayPower = 0f;
@@ -62,6 +65,7 @@ public class PlayerController : MonoBehaviour
     private Coroutine straighteningCoroutine;
     private float lastYaw = 0f;
     private bool wasGripInputActiveLastFrame = false;
+    private Animator playerAnim;
 
     // --- Joy-Con関連の内部変数 ---
     private List<Joycon> joycons;
@@ -72,6 +76,7 @@ public class PlayerController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody2D>();
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+        playerAnim = GetComponentInChildren<Animator>();
 
         // Joy-Conのセットアップ
         joycons = JoyconManager.instance.j;
@@ -106,6 +111,27 @@ public class PlayerController : MonoBehaviour
 
         // --- ステップ3: 来フレームのために、今の状態を記録しておく ---
         wasGripInputActiveLastFrame = isGripInputActive;
+
+        // DEBUG
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            playerAnim.SetTrigger("Jump");
+        }
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            playerAnim.SetTrigger("Kick");
+        }
+        if (debugMode)
+        {
+            if (Input.GetKey(KeyCode.LeftArrow))
+            {
+                rb.velocity = Vector2.left * 5f;
+            }
+            if (Input.GetKey(KeyCode.RightArrow))
+            {
+                rb.velocity = Vector2.right * 5f;
+            }
+        }
     }
 
     void FixedUpdate()
@@ -116,61 +142,76 @@ public class PlayerController : MonoBehaviour
             ExecuteSwayingPhysics();
         }
 
-        // パワーは常に自然減少していく
-        swayPower = Mathf.Max(0, swayPower - swayDecayRate * Time.fixedDeltaTime);
+        // デバッグモード中は減衰率を0に、そうでなければ通常の値を使用する
+        float currentDecayRate = debugMode ? 0f : swayDecayRate;
+        swayPower = Mathf.Max(0, swayPower - currentDecayRate * Time.fixedDeltaTime);
     }
+
+    // in PlayerController.cs
 
     private void ExecuteSwayingPhysics()
     {
-        if (joycon == null) return;
-
-        // --- 1. Joy-Conから現在の角度と角速度を取得 ---
-        Quaternion orientation = joycon.GetVector();
-        Vector3 eulerAngles = orientation.eulerAngles;
-        float currentYaw = eulerAngles.y;
-
-        // 前フレームとの差から角速度を計算 (360度の境界をまたいでも正しく計算する)
-        float yawVelocity = Mathf.DeltaAngle(lastYaw, currentYaw) / Time.fixedDeltaTime;
-        lastYaw = currentYaw;
-
-        // --- 2. 角度に基づいて、現在のフレームでかけるべき力の方向を計算 ---
-        float normalizedForce = 0f;
-        if (currentYaw > rightSwingAngleMin && currentYaw < rightSwingAngleMax)
+        // --- デバッグモード時のキーボード操作 ---
+        if (debugMode)
         {
-            // 210度で0、270度で1になるように正規化
-            normalizedForce = Mathf.InverseLerp(rightSwingAngleMin, rightSwingAngleMax, currentYaw);
+            float horizontalInput = Input.GetAxisRaw("Horizontal");
+
+            // キー入力がなければ、Grabbing状態にして処理を終える
+            if (Mathf.Abs(horizontalInput) < 0.1f)
+            {
+                currentState = PlayerState.Grabbing;
+                return;
+            }
+
             currentState = PlayerState.Swaying;
+
+            // キーが押されている間は常にパワーが増加する
+            float powerIncrease = swayIncreaseRate * Time.fixedDeltaTime;
+            swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
+            //Debug.Log($"<color=yellow>[DEBUG]</color> Rate: {swayIncreaseRate}, Power: <b>{swayPower.ToString("F1")}</b>");
+
+            // トルクを加える処理は変更なし
+            float totalTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
+            rb.AddTorque(totalTorque);
         }
-        else if (currentYaw > leftSwingAngleMax && currentYaw < leftSwingAngleMin)
-        {
-            // 150度で0、90度で-1になるように正規化 (-1は左方向の力)
-            normalizedForce = -Mathf.InverseLerp(leftSwingAngleMin, leftSwingAngleMax, currentYaw);
-            currentState = PlayerState.Swaying;
-        }
+        // --- 通常時のJoy-Con操作 ---
         else
         {
-            currentState = PlayerState.Grabbing; // デッドゾーンにいる
-        }
+            if (joycon == null) return;
 
-        // --- 3. タイミングが良いか判定し、良ければパワーを蓄積 & トルクをかける ---
-        // 判定基準を「キャラクターの回転速度」から「Joy-Conを振る速さ」に変更
-        bool isTimingGood = (yawVelocity > swingVelocityThreshold && normalizedForce > 0) || // Joy-Conを素早く右に振っている
-                            (yawVelocity < -swingVelocityThreshold && normalizedForce < 0);  // Joy-Conを素早く左に振っている
-
-        if (isTimingGood)
-        {
-            // パワーの蓄積（角度の深さと振りの速さの両方を考慮）
-            float powerIncrease = (Mathf.Abs(normalizedForce) + Mathf.Abs(yawVelocity) * swayForceByVelocity)
-                                * swayIncreaseRate
-                                * Time.fixedDeltaTime;
-            swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
-
-            // パワーが増加した瞬間にログを出力
-            Debug.Log($"<color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
-
-            // パワーが溜まっているほど、スイングの力が強くなるように計算
-            float totalTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
-            rb.AddTorque(totalTorque);
+            // (Joy-Conのロジックは変更なし)
+            Quaternion orientation = joycon.GetVector();
+            Vector3 eulerAngles = orientation.eulerAngles;
+            float currentYaw = eulerAngles.y;
+            float yawVelocity = Mathf.DeltaAngle(lastYaw, currentYaw) / Time.fixedDeltaTime;
+            lastYaw = currentYaw;
+            float normalizedForce = 0f;
+            if (currentYaw > rightSwingAngleMin && currentYaw < rightSwingAngleMax)
+            {
+                normalizedForce = Mathf.InverseLerp(rightSwingAngleMin, rightSwingAngleMax, currentYaw);
+                currentState = PlayerState.Swaying;
+            }
+            else if (currentYaw > leftSwingAngleMax && currentYaw < leftSwingAngleMin)
+            {
+                normalizedForce = -Mathf.InverseLerp(leftSwingAngleMin, leftSwingAngleMax, currentYaw);
+                currentState = PlayerState.Swaying;
+            }
+            else
+            {
+                currentState = PlayerState.Grabbing;
+            }
+            bool isTimingGood = (yawVelocity > swingVelocityThreshold && normalizedForce > 0) ||
+                                (yawVelocity < -swingVelocityThreshold && normalizedForce < 0);
+            if (isTimingGood)
+            {
+                float powerIncrease = (Mathf.Abs(normalizedForce) + Mathf.Abs(yawVelocity) * swayForceByVelocity)
+                                    * swayIncreaseRate
+                                    * Time.fixedDeltaTime;
+                swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
+                Debug.Log($"<color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
+                float totalTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
+                rb.AddTorque(totalTorque);
+            }
         }
     }
 
@@ -185,6 +226,8 @@ public class PlayerController : MonoBehaviour
         HangingStrap nearestStrap = HangingStrapManager.FindNearestStrap(transform.position, maxGrabDistance);
         if (nearestStrap != null)
         {
+            playerAnim.SetTrigger("Jump");
+
             // 空中(Launched)から再掴みした場合、既存の速度を減衰させて無限加速を防ぐ
             if (currentState == PlayerState.Launched)
             {
@@ -213,6 +256,15 @@ public class PlayerController : MonoBehaviour
     private void ReleaseStrap()
     {
         if (currentState == PlayerState.Idle || currentState == PlayerState.Launched) return;
+
+        if (swayPower < 1f)
+        {
+            playerAnim.SetTrigger("Release");
+        }
+        else
+        {
+            playerAnim.SetTrigger("Kick");
+        }
 
         // 発射する瞬間に、使用したパワーをログに出力
         Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");

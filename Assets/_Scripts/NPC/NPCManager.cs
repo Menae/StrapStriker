@@ -47,36 +47,67 @@ public class NPCManager : MonoBehaviour
 
         // 指定した間隔でNPCの状態を更新する処理を予約
         InvokeRepeating(nameof(UpdateNpcStates), 0f, checkInterval);
-
-        // Inspectorで設定した数の初期NPCをスポーンさせる
-        SpawnInitialNPCs(initialNpcCount);
     }
 
-    // 指定された数のNPCをランダムな位置にスポーンさせるメソッド
-    public void SpawnInitialNPCs(int count)
+    /// <summary>
+    /// StageManagerの指示でNPCをスポーンさせる
+    /// </summary>
+    /// <param name="manager">呼び出し元のStageManager</param>
+    /// <param name="count">スポーンさせる数</param>
+    /// <returns>実際にスポーンした数</returns>
+    public int SpawnNPCs(StageManager manager, int count)
     {
+        int spawnedCount = 0;
         for (int i = 0; i < count; i++)
         {
             GameObject npcObject = NPCPool.instance.GetNPC();
 
-            // 指定したスポーン範囲内のランダムな位置を計算
+            // X座標はランダム、Y座標はspawnAreaCenter.yに固定
             float minX = spawnAreaCenter.x - spawnAreaSize.x / 2;
             float maxX = spawnAreaCenter.x + spawnAreaSize.x / 2;
-            float minY = spawnAreaCenter.y - spawnAreaSize.y / 2;
-            float maxY = spawnAreaCenter.y + spawnAreaSize.y / 2;
+            float fixedY = spawnAreaCenter.y;
 
             Vector2 randomPosition;
+            int maxTries = 100; // 無限ループを避けるための試行回数の上限
+            int tries = 0;
+
             // 生成した座標がプレイヤーのセーフゾーン内だったら、座標を再抽選する
             do
             {
-                randomPosition = new Vector2(Random.Range(minX, maxX), Random.Range(minY, maxY));
+                randomPosition = new Vector2(Random.Range(minX, maxX), fixedY);
+                tries++;
+                if (tries > maxTries)
+                {
+                    Debug.LogWarning("Could not find a valid spawn position outside the player's safe radius. Spawning NPC anyway.");
+                    break;
+                }
             } while (Vector2.Distance(randomPosition, playerTransform.position) < playerSafeRadius);
 
             npcObject.transform.position = randomPosition;
 
-            // 管理リストに追加
-            spawnedNpcs.Add(npcObject.GetComponent<NPCController>());
+            NPCController controller = npcObject.GetComponent<NPCController>();
+            if (controller != null)
+            {
+                controller.SetStageManager(manager); // NPCに司令塔を教える
+                spawnedNpcs.Add(controller);
+                spawnedCount++;
+            }
         }
+        return spawnedCount;
+    }
+
+    /// <summary>
+    /// 混雑率からNPCの数を計算してスポーンする
+    /// </summary>
+    /// <param name="manager">呼び出し元のStageManager</param>
+    /// <param name="congestionRate">現在の混雑率</param>
+    public void SpawnNPCsForCongestion(StageManager manager, float congestionRate)
+    {
+        // rateDecreasePerNpcが0だとエラーになるのを防ぐ
+        if (manager.rateDecreasePerNpc <= 0) return;
+
+        int count = Mathf.FloorToInt(congestionRate / manager.rateDecreasePerNpc);
+        SpawnNPCs(manager, count);
     }
 
     // 全NPCの状態を更新する（Physics LOD）
@@ -86,7 +117,7 @@ public class NPCManager : MonoBehaviour
 
         foreach (NPCController npc in spawnedNpcs)
         {
-            if (!npc.gameObject.activeInHierarchy) continue;
+            if (npc == null || !npc.gameObject.activeInHierarchy) continue;
 
             float distance = Vector2.Distance(npc.transform.position, playerTransform.position);
 
