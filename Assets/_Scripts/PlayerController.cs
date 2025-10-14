@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -9,6 +9,10 @@ public class PlayerController : MonoBehaviour
 
     [Header("必須コンポーネント")]
     public Transform handPoint;
+
+    [Header("Arduino設定")]
+    [Tooltip("この値以上の握力でつり革を掴みます")]
+    public int gripThreshold = 500;
 
     [Header("スイングアクション設定")]
     [Tooltip("Joy-Conの傾き角度がスイングの力に与える影響の大きさ")]
@@ -57,6 +61,7 @@ public class PlayerController : MonoBehaviour
     private HingeJoint2D activeHingeJoint;
     private Coroutine straighteningCoroutine;
     private float lastYaw = 0f;
+    private bool wasGripInputActiveLastFrame = false;
 
     // --- Joy-Con関連の内部変数 ---
     private List<Joycon> joycons;
@@ -78,22 +83,29 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        // アイドル中、または発射中にスペースキーが押されたら掴む
-        if (currentState == PlayerState.Idle || currentState == PlayerState.Launched)
+        // --- ステップ1: 全ての入力を1つの状態に統一する ---
+        bool isGripInputActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
+
+        // --- ステップ2: 状態が切り替わった「瞬間」を検知する ---
+        // もし今フレームで「掴み始めた」なら
+        if (isGripInputActive && !wasGripInputActiveLastFrame)
         {
-            if (Input.GetKeyDown(KeyCode.Space))
+            if (currentState == PlayerState.Idle || currentState == PlayerState.Launched)
             {
                 GrabNearestStrap();
             }
         }
-        // 掴んでいる最中にスペースキーが離されたら発射
-        else if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
+        // もし今フレームで「離し始めた」なら
+        else if (!isGripInputActive && wasGripInputActiveLastFrame)
         {
-            if (Input.GetKeyUp(KeyCode.Space))
+            if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
             {
                 ReleaseStrap();
             }
         }
+
+        // --- ステップ3: 来フレームのために、今の状態を記録しておく ---
+        wasGripInputActiveLastFrame = isGripInputActive;
     }
 
     void FixedUpdate()
