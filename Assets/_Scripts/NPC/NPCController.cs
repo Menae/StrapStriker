@@ -138,12 +138,12 @@ public class NPCController : MonoBehaviour
     private IEnumerator FadeOutAndDespawnRoutine()
     {
         currentState = NPCState.KnockedDown;
-        Debug.Log("NPCが消滅シーケンスを開始！"); // ログ1: 消滅処理が始まったか
+        Debug.Log("NPCが消滅シーケンスを開始！");
 
         // フェードが始まるまで待機
         yield return new WaitForSeconds(timeBeforeFade);
 
-        // (既存のフェード処理...)
+        // 既存のフェード処理
         float timer = 0f;
         Color startColor = visualSprite.color;
         while (timer < fadeDuration)
@@ -154,18 +154,15 @@ public class NPCController : MonoBehaviour
             yield return null;
         }
 
-        // ▼▼▼ ここから修正 ▼▼▼
         // 司令塔に報告
         if (stageManager != null)
         {
-            Debug.Log("<color=cyan>StageManagerに報告します。</color>"); // ログ2: 報告処理が実行されるか
             stageManager.UpdateCongestionOnNpcDefeated();
         }
         else
         {
-            Debug.LogError("<color=red>エラー: StageManagerへの参照がありません！報告できませんでした。</color>"); // ログ3: 参照がnullだった場合
+            Debug.LogError("<color=red>エラー: StageManagerへの参照がありません！報告できませんでした。</color>");
         }
-        // ▲▲▲ ここまで修正 ▲▲▲
 
         // 完全に消滅したら、プールに自身を返却する
         NPCPool.instance.ReturnNPC(this.gameObject);

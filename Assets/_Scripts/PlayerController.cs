@@ -66,6 +66,7 @@ public class PlayerController : MonoBehaviour
     private float lastYaw = 0f;
     private bool wasGripInputActiveLastFrame = false;
     private Animator playerAnim;
+    private StageManager stageManager;
 
     // --- Joy-Con関連の内部変数 ---
     private List<Joycon> joycons;
@@ -78,6 +79,13 @@ public class PlayerController : MonoBehaviour
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         playerAnim = GetComponentInChildren<Animator>();
 
+        // シーン内にあるStageManagerを探す
+        stageManager = FindObjectOfType<StageManager>();
+        if (stageManager == null)
+        {
+            Debug.LogError("シーン内にStageManagerが見つかりません！");
+        }
+
         // Joy-Conのセットアップ
         joycons = JoyconManager.instance.j;
         if (joycons.Count > 0)
@@ -88,6 +96,11 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        if (stageManager != null && stageManager.CurrentState != StageManager.GameState.Playing)
+        {
+            return; // 即座にメソッドを抜ける
+        }
+
         // --- ステップ1: 全ての入力を1つの状態に統一する ---
         bool isGripInputActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
 
@@ -308,7 +321,7 @@ public class PlayerController : MonoBehaviour
         if (collision.gameObject.CompareTag("NPC"))
         {
             NPCController npc = collision.gameObject.GetComponent<NPCController>();
-            if (npc != null && (currentState == PlayerState.Launched || currentState == PlayerState.Swaying))
+            if (npc != null && (currentState == PlayerState.Launched || currentState == PlayerState.Swaying || currentState == PlayerState.Grabbing))
             {
                 npc.TakeImpact(rb.velocity, knockbackMultiplier);
             }

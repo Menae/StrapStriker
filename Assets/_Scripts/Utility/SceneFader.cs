@@ -3,79 +3,107 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using System.Collections;
 
-public class SimpleSceneFader : MonoBehaviour
+public class SceneFader : MonoBehaviour
 {
-    [Header("必須コンポーネント")]
-    [Tooltip("フェード効果に使うUIのImageをアタッチしてください。")]
-    [SerializeField] private Image fadeImage;
+    // どこからでもアクセスできるシングルトンインスタンス
+    public static SceneFader instance;
 
-    [Header("遷移設定")]
-    [Tooltip("遷移したいシーンの名前")]
-    [SerializeField] private string targetSceneName = "YourSceneName";
-    [Tooltip("画面が完全に暗くなるまでにかかる時間")]
-    [SerializeField] private float fadeOutDuration = 1.0f;
-
-    [Header("シーン開始時の設定")]
-    [Tooltip("シーンが始まった時に画面が明るくなるまでにかかる時間")]
-    [SerializeField] private float fadeInDuration = 1.0f;
-
-    [Header("色設定")]
+    [Tooltip("フェードに使うUIのImageコンポーネント")]
+    public Image fadeImage;
+    [Tooltip("デフォルトのフェード時間")]
+    public float defaultFadeDuration = 1.0f;
     [Tooltip("フェードの色")]
-    [SerializeField] private Color fadeColor = Color.black;
+    public Color fadeColor = Color.black;
 
-    void Start()
+    private void Awake()
     {
-        // fadeImageが設定されていなければ、エラーを出して何もしない
-        if (fadeImage == null)
+        // シングルトンパターンの実装
+        if (instance == null)
         {
-            Debug.LogError("Fade Imageが設定されていません！ このコンポーネントは機能しません。", this.gameObject);
-            return;
+            instance = this;
+            DontDestroyOnLoad(gameObject); // シーンをまたいでも破棄されないようにする
         }
+        else
+        {
+            Destroy(gameObject); // 既にインスタンスが存在する場合は破棄
+        }
+    }
 
-        // このスクリプトが有効になった時、自動でフェードインを開始する
-        StartCoroutine(FadeInCoroutine());
+    private void OnEnable()
+    {
+        // シーンがロードされた時に自動でフェードインが始まるようにイベントを登録
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    // シーンロード時に実行されるメソッド
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        StartCoroutine(FadeInCoroutine(defaultFadeDuration));
     }
 
     /// <summary>
-    /// UIボタンのOnClickイベントから呼び出すためのメソッドです。
+    /// 他のスクリプトからシーン遷移を呼び出すための公開メソッド
     /// </summary>
-    public void StartFadeOut()
+    public void LoadSceneWithFade(string sceneName)
     {
-        if (fadeImage == null) return;
-        StartCoroutine(FadeOutCoroutine());
+        StartCoroutine(FadeOutCoroutine(sceneName, defaultFadeDuration));
     }
 
-    // フェードアウト(徐々に暗くなる)処理
-    private IEnumerator FadeOutCoroutine()
+    /// <summary>
+    /// フェード時間を指定してシーン遷移を呼び出す
+    /// </summary>
+    public void LoadSceneWithFade(string sceneName, float duration)
     {
-        float timer = 0f;
-        fadeImage.gameObject.SetActive(true);
+        StartCoroutine(FadeOutCoroutine(sceneName, duration));
+    }
 
-        while (timer < fadeOutDuration)
+    // フェードアウト処理
+    private IEnumerator FadeOutCoroutine(string sceneName, float duration)
+    {
+        fadeImage.gameObject.SetActive(true);
+        fadeImage.color = new Color(fadeColor.r, fadeColor.g, fadeColor.b, 0f);
+
+        float startTime = Time.realtimeSinceStartup; // 現実世界の開始時刻を記録
+        float elapsedTime = 0f;
+
+        while (elapsedTime < duration)
         {
-            float alpha = Mathf.Lerp(0f, 1f, timer / fadeOutDuration);
+            // 開始時刻からの現実の経過時間を毎フレーム計算
+            elapsedTime = Time.realtimeSinceStartup - startTime;
+            float alpha = Mathf.Lerp(0f, 1f, elapsedTime / duration);
             fadeImage.color = new Color(fadeColor.r, fadeColor.g, fadeColor.b, alpha);
-            timer += Time.deltaTime;
             yield return null;
         }
+
+        fadeImage.color = new Color(fadeColor.r, fadeColor.g, fadeColor.b, 1f);
+        SceneManager.LoadScene(sceneName);
+    }
+
+    private IEnumerator FadeInCoroutine(float duration)
+    {
+        fadeImage.gameObject.SetActive(true);
         fadeImage.color = new Color(fadeColor.r, fadeColor.g, fadeColor.b, 1f);
 
-        SceneManager.LoadScene(targetSceneName);
-    }
+        // まず、シーンロード直後の不安定な1フレームをやり過ごす
+        yield return null;
 
-    // フェードイン(徐々に明るくなる)処理
-    private IEnumerator FadeInCoroutine()
-    {
-        float timer = 0f;
-        fadeImage.gameObject.SetActive(true);
+        // 完全に安定した次のフレームで、改めて開始時刻を記録する
+        float startTime = Time.realtimeSinceStartup;
+        float elapsedTime = 0f;
 
-        while (timer < fadeInDuration)
+        while (elapsedTime < duration)
         {
-            float alpha = Mathf.Lerp(1f, 0f, timer / fadeInDuration);
+            elapsedTime = Time.realtimeSinceStartup - startTime;
+            float alpha = Mathf.Lerp(1f, 0f, elapsedTime / duration);
             fadeImage.color = new Color(fadeColor.r, fadeColor.g, fadeColor.b, alpha);
-            timer += Time.deltaTime;
             yield return null;
         }
+
         fadeImage.color = new Color(fadeColor.r, fadeColor.g, fadeColor.b, 0f);
         fadeImage.gameObject.SetActive(false);
     }
