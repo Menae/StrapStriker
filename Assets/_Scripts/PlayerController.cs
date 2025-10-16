@@ -67,6 +67,7 @@ public class PlayerController : MonoBehaviour
     private bool wasGripInputActiveLastFrame = false;
     private Animator playerAnim;
     private StageManager stageManager;
+    private float lastFacingDirection = 1f; // 最後に見ていた方向(1=右, -1=左)最初は右向き。
 
     // --- Joy-Con関連の内部変数 ---
     private List<Joycon> joycons;
@@ -160,7 +161,52 @@ public class PlayerController : MonoBehaviour
         swayPower = Mathf.Max(0, swayPower - currentDecayRate * Time.fixedDeltaTime);
     }
 
-    // in PlayerController.cs
+    private void LateUpdate()
+    {
+        // --- アニメーションの状態を同期 ---
+        if (playerAnim != null)
+        {
+            playerAnim.SetInteger("State", (int)currentState);
+        }
+
+        // --- キャラクターの向きを同期 ---
+        HandleDirection();
+    }
+
+    private void ChangeState(PlayerState newState)
+    {
+        // もし状態が変わらないなら何もしない
+        if (currentState == newState) return;
+
+        // 状態を変更し、デバッグログで変更を追跡する
+        currentState = newState;
+        Debug.Log($"<color=lightblue>Player State changed to: {newState}</color>");
+    }
+
+    private void HandleDirection()
+    {
+        // 物理的につり革を掴んでいる間は、向きの更新処理を一切行わない
+        if (currentStrap != null)
+        {
+            return;
+        }
+
+        // キャラクターの水平方向の速度を取得
+        float horizontalVelocity = rb.velocity.x;
+
+        // わずかな動きは無視し、一定以上の速度が出ている時だけ向きを更新
+        if (Mathf.Abs(horizontalVelocity) > 0.1f)
+        {
+            // 速度の方向に応じて、向き(-1か1)を決定
+            lastFacingDirection = Mathf.Sign(horizontalVelocity);
+        }
+
+        // Animatorに現在の向きを伝える
+        if (playerAnim != null)
+        {
+            playerAnim.SetFloat("Direction", lastFacingDirection);
+        }
+    }
 
     private void ExecuteSwayingPhysics()
     {
@@ -172,11 +218,11 @@ public class PlayerController : MonoBehaviour
             // キー入力がなければ、Grabbing状態にして処理を終える
             if (Mathf.Abs(horizontalInput) < 0.1f)
             {
-                currentState = PlayerState.Grabbing;
+                ChangeState(PlayerState.Grabbing);
                 return;
             }
 
-            currentState = PlayerState.Swaying;
+            ChangeState(PlayerState.Swaying);
 
             // キーが押されている間は常にパワーが増加する
             float powerIncrease = swayIncreaseRate * Time.fixedDeltaTime;
@@ -202,16 +248,16 @@ public class PlayerController : MonoBehaviour
             if (currentYaw > rightSwingAngleMin && currentYaw < rightSwingAngleMax)
             {
                 normalizedForce = Mathf.InverseLerp(rightSwingAngleMin, rightSwingAngleMax, currentYaw);
-                currentState = PlayerState.Swaying;
+                ChangeState(PlayerState.Swaying);
             }
             else if (currentYaw > leftSwingAngleMax && currentYaw < leftSwingAngleMin)
             {
                 normalizedForce = -Mathf.InverseLerp(leftSwingAngleMin, leftSwingAngleMax, currentYaw);
-                currentState = PlayerState.Swaying;
+                ChangeState(PlayerState.Swaying);
             }
             else
             {
-                currentState = PlayerState.Grabbing;
+                ChangeState(PlayerState.Grabbing);
             }
             bool isTimingGood = (yawVelocity > swingVelocityThreshold && normalizedForce > 0) ||
                                 (yawVelocity < -swingVelocityThreshold && normalizedForce < 0);
@@ -239,8 +285,6 @@ public class PlayerController : MonoBehaviour
         HangingStrap nearestStrap = HangingStrapManager.FindNearestStrap(transform.position, maxGrabDistance);
         if (nearestStrap != null)
         {
-            playerAnim.SetTrigger("Jump");
-
             // 空中(Launched)から再掴みした場合、既存の速度を減衰させて無限加速を防ぐ
             if (currentState == PlayerState.Launched)
             {
@@ -248,7 +292,7 @@ public class PlayerController : MonoBehaviour
                 rb.velocity *= aerialRecatchDampener;
             }
 
-            currentState = PlayerState.Grabbing;
+            ChangeState(PlayerState.Grabbing);
             currentStrap = nearestStrap;
             rb.constraints = RigidbodyConstraints2D.None; // 回転を許可
 
@@ -270,19 +314,10 @@ public class PlayerController : MonoBehaviour
     {
         if (currentState == PlayerState.Idle || currentState == PlayerState.Launched) return;
 
-        if (swayPower < 1f)
-        {
-            playerAnim.SetTrigger("Release");
-        }
-        else
-        {
-            playerAnim.SetTrigger("Kick");
-        }
-
         // 発射する瞬間に、使用したパワーをログに出力
         Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");
 
-        currentState = PlayerState.Launched;
+        ChangeState(PlayerState.Launched);
         Destroy(activeHingeJoint);
         rb.constraints = RigidbodyConstraints2D.None; // 念のため
 
@@ -327,12 +362,21 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        if (currentState == PlayerState.Launched && collision.gameObject.CompareTag("Ground"))
+        // 地面との衝突判定
+        if (collision.gameObject.CompareTag("Ground"))
         {
-            currentState = PlayerState.Idle;
-            if (straighteningCoroutine != null) StopCoroutine(straighteningCoroutine);
-            rb.rotation = 0f;
-            rb.constraints = RigidbodyConstraints2D.FreezeRotation; // 地面に着いたら回転を禁止
+            // 物理的につり革に接続されていない場合、地面にいるなら必ずアイドル状態になる
+            if (activeHingeJoint == null)
+            {
+                ChangeState(PlayerState.Idle);
+                if (straighteningCoroutine != null)
+                {
+                    StopCoroutine(straighteningCoroutine);
+                    straighteningCoroutine = null;
+                }
+                rb.rotation = 0f;
+                rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+            }
         }
     }
 }

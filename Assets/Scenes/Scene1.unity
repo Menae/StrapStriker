@@ -3352,7 +3352,7 @@ MonoBehaviour:
   maxCongestionRate: 300
   rateDecreasePerNpc: 5
   stationEvents:
-  - timeToArrival: 1
+  - timeToArrival: 9999
     npcsToSpawn: 20
     stationName: "\u5317\u5927\u8DEF"
   - timeToArrival: 1
