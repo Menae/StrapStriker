@@ -24,6 +24,17 @@ public class NPCManager : MonoBehaviour
     [Tooltip("NPCがスポーンするエリアのサイズ(横幅と縦幅)")]
     public Vector2 spawnAreaSize;
 
+    [Header("ドア周辺スポーン設定")]
+    [Tooltip("ドアの位置となるTransformのリスト")]
+    public List<Transform> doorSpawnPoints;
+    [Tooltip("ドアの真ん前に集中してスポーンする半径")]
+    public float burstRadius = 1.0f;
+    [Tooltip("ドアの周辺に広がってスポーンする半径")]
+    public float spreadRadius = 5.0f;
+    [Tooltip("全スポーン数のうち、ドアの真ん前に集中させる割合 (0.8 = 80%)")]
+    [Range(0f, 1f)]
+    public float burstPercentage = 0.8f;
+
     // 現在シーンに存在している（プールから取り出されている）全NPCのリスト
     private List<NPCController> spawnedNpcs = new List<NPCController>();
     private Transform playerTransform;
@@ -57,43 +68,73 @@ public class NPCManager : MonoBehaviour
     /// <returns>実際にスポーンした数</returns>
     public int SpawnNPCs(StageManager manager, int count)
     {
+        // ドアが1つも設定されていない場合は、以前のロジックでスポーンする
+        if (doorSpawnPoints == null || doorSpawnPoints.Count == 0)
+        {
+            Debug.LogWarning("ドアが設定されていません。通常のランダムスポーンを実行します。");
+            return SpawnNPCsInArea(manager, count); // 古いロジックを呼び出す
+        }
+
         int spawnedCount = 0;
+        // 集中スポーンさせるNPCの数を計算
+        int burstCount = Mathf.FloorToInt(count * burstPercentage);
+
+        // --- フェーズ1: 集中スポーン (Burst) ---
+        for (int i = 0; i < burstCount; i++)
+        {
+            Transform randomDoor = doorSpawnPoints[Random.Range(0, doorSpawnPoints.Count)];
+
+            // X座標だけをランダムにし、Y座標はドアの位置に固定する
+            float randomXOffset = Random.Range(-burstRadius, burstRadius);
+            Vector2 spawnPos = new Vector2(randomDoor.position.x + randomXOffset, randomDoor.position.y);
+
+            SpawnSingleNPC(manager, spawnPos);
+            spawnedCount++;
+        }
+
+        // --- フェーズ2: 拡散スポーン (Spread) ---
+        int spreadCount = count - burstCount;
+        for (int i = 0; i < spreadCount; i++)
+        {
+            Transform randomDoor = doorSpawnPoints[Random.Range(0, doorSpawnPoints.Count)];
+
+            // X座標だけをランダムにし、Y座標はドアの位置に固定する
+            float randomXOffset = Random.Range(-spreadRadius, spreadRadius);
+            Vector2 spawnPos = new Vector2(randomDoor.position.x + randomXOffset, randomDoor.position.y);
+
+            SpawnSingleNPC(manager, spawnPos);
+            spawnedCount++;
+        }
+
+        return spawnedCount;
+    }
+
+    // 1体のNPCを特定の位置にスポーンさせる処理
+    private void SpawnSingleNPC(StageManager manager, Vector2 position)
+    {
+        GameObject npcObject = NPCPool.instance.GetNPC();
+        npcObject.transform.position = position;
+
+        NPCController controller = npcObject.GetComponent<NPCController>();
+        if (controller != null)
+        {
+            controller.SetStageManager(manager);
+            spawnedNpcs.Add(controller);
+        }
+    }
+
+    // 古いエリア内ランダムスポーンのロジック
+    private int SpawnNPCsInArea(StageManager manager, int count)
+    {
         for (int i = 0; i < count; i++)
         {
-            GameObject npcObject = NPCPool.instance.GetNPC();
-
-            // X座標はランダム、Y座標はspawnAreaCenter.yに固定
             float minX = spawnAreaCenter.x - spawnAreaSize.x / 2;
             float maxX = spawnAreaCenter.x + spawnAreaSize.x / 2;
             float fixedY = spawnAreaCenter.y;
-
-            Vector2 randomPosition;
-            int maxTries = 100; // 無限ループを避けるための試行回数の上限
-            int tries = 0;
-
-            // 生成した座標がプレイヤーのセーフゾーン内だったら、座標を再抽選する
-            do
-            {
-                randomPosition = new Vector2(Random.Range(minX, maxX), fixedY);
-                tries++;
-                if (tries > maxTries)
-                {
-                    Debug.LogWarning("Could not find a valid spawn position outside the player's safe radius. Spawning NPC anyway.");
-                    break;
-                }
-            } while (Vector2.Distance(randomPosition, playerTransform.position) < playerSafeRadius);
-
-            npcObject.transform.position = randomPosition;
-
-            NPCController controller = npcObject.GetComponent<NPCController>();
-            if (controller != null)
-            {
-                controller.SetStageManager(manager); // NPCに司令塔を教える
-                spawnedNpcs.Add(controller);
-                spawnedCount++;
-            }
+            Vector2 randomPosition = new Vector2(Random.Range(minX, maxX), fixedY);
+            SpawnSingleNPC(manager, randomPosition);
         }
-        return spawnedCount;
+        return count;
     }
 
     /// <summary>

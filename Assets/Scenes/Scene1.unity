@@ -123,6 +123,40 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &11687692
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 11687693}
+  m_Layer: 0
+  m_Name: DoorSpawnPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &11687693
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 11687692}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 1518125314}
+  - {fileID: 380481991}
+  - {fileID: 210519125}
+  m_Father: {fileID: 1787355313}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &24396829
 GameObject:
   m_ObjectHideFlags: 0
@@ -452,6 +486,37 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &210519124
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 210519125}
+  m_Layer: 0
+  m_Name: 3
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &210519125
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 210519124}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 20.1, y: -2.4199998, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 11687693}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &314237156
 GameObject:
   m_ObjectHideFlags: 0
@@ -848,6 +913,37 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 3377572660751062015, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
   m_PrefabInstance: {fileID: 1609664517}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &380481990
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 380481991}
+  m_Layer: 0
+  m_Name: 2
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &380481991
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 380481990}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 6.61, y: -2.0099998, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 11687693}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &396537234
 GameObject:
   m_ObjectHideFlags: 0
@@ -3216,15 +3312,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   inertiaForce: -10
-  initialCongestionRate: 10
-  maxCongestionRate: 300
+  initialCongestionRate: 80
+  maxCongestionRate: 1000
   rateDecreasePerNpc: 5
   stationEvents:
   - timeToArrival: 1
-    npcsToSpawn: 10
+    npcsToSpawn: 30
     stationName: "\u5317\u5927\u8DEF"
   - timeToArrival: 1
-    npcsToSpawn: 10
+    npcsToSpawn: 30
     stationName: "\u978D\u99AC\u53E3"
   tutorialPanel: {fileID: 914811058}
   pauseMenuPanel: {fileID: 1772865879}
@@ -4367,6 +4463,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1507276603}
   m_CullTransparentMesh: 1
+--- !u!1 &1518125313
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1518125314}
+  m_Layer: 0
+  m_Name: 1
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1518125314
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1518125313}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -6.71, y: -2.07, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 11687693}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1529064032
 GameObject:
   m_ObjectHideFlags: 0
@@ -4779,12 +4906,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b326f59bbaa85404ea27d4b069dd79b2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  activationRadius: 10
+  activationRadius: 30
   checkInterval: 0.5
   initialNpcCount: 10
   playerSafeRadius: 2
   spawnAreaCenter: {x: 6.45, y: -2}
   spawnAreaSize: {x: 51, y: 0.5}
+  doorSpawnPoints:
+  - {fileID: 1518125314}
+  - {fileID: 380481991}
+  - {fileID: 210519125}
+  burstRadius: 3
+  spreadRadius: 6
+  burstPercentage: 1
 --- !u!4 &1622307978
 Transform:
   m_ObjectHideFlags: 0
@@ -5462,6 +5596,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 11687693}
   - {fileID: 590667436}
   - {fileID: 1879277996}
   - {fileID: 2067077391}

@@ -11,6 +11,12 @@ public class NPCController : MonoBehaviour
     }
     private NPCState currentState = NPCState.Idle;
 
+    [Header("パーソナルスペースAI設定")]
+    [Tooltip("この半径内に他のNPCがいると、離れようとします")]
+    public float personalSpaceRadius = 0.5f;
+    [Tooltip("他のNPCから離れる時の力の強さ")]
+    public float separationForce = 1.0f;
+
     [Header("物理リアクション設定")]
     [Tooltip("この衝撃の強さを超えると『座る』アニメーションを再生")]
     public float satThreshold = 5.0f;
@@ -55,6 +61,31 @@ public class NPCController : MonoBehaviour
         }
     }
 
+    void FixedUpdate()
+    {
+        if (currentState == NPCState.Idle && isActivated)
+        {
+            int layerMask = LayerMask.GetMask("NPC");
+            Collider2D[] nearColliders = Physics2D.OverlapCircleAll(transform.position, personalSpaceRadius, layerMask);
+
+            Vector2 totalSeparationForce = Vector2.zero;
+
+            foreach (var col in nearColliders)
+            {
+                if (col.gameObject == this.gameObject) continue;
+
+                float distance = Vector2.Distance(transform.position, col.transform.position);
+                float strength = 1.0f - (distance / personalSpaceRadius);
+                Vector2 pushDirection = (transform.position - col.transform.position).normalized;
+                totalSeparationForce += pushDirection * strength;
+            }
+
+            // Y方向の力を無視し、X方向(左右)にのみ力を加えるようにする
+            totalSeparationForce.y = 0;
+            rb.AddForce(totalSeparationForce * separationForce);
+        }
+    }
+
     /// <summary>
     /// StageManagerをセットするための公開メソッド
     /// </summary>
@@ -80,13 +111,14 @@ public class NPCController : MonoBehaviour
     /// </summary>
     public void Deactivate()
     {
-        // もしNPCがダウン中(座り、または倒れ中)なら、無効化処理を中断する
         if (currentState == NPCState.KnockedDown) return;
-
         if (!isActivated) return;
+
         isActivated = false;
         rb.simulated = false;
         this.enabled = false;
+
+        rb.velocity = Vector2.zero; // スリープする際に速度をリセット
     }
 
     /// <summary>
