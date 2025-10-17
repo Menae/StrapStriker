@@ -34,6 +34,12 @@ public class StageManager : MonoBehaviour
     public enum GameState { Tutorial, Playing, Paused, GameOver, StageClear }
     public GameState CurrentState { get; private set; }
 
+    public static Vector2 CurrentInertia { get; private set; } // 他のスクリプトから読み取れる慣性ベクトル
+
+    [Header("慣性設定")]
+    [Tooltip("加速/減速中に働く慣性力の強さ")]
+    public float inertiaForce = 10f;
+
     [Header("混雑率設定")]
     [Tooltip("初期の混雑率")]
     public float initialCongestionRate = 150f;
@@ -86,9 +92,10 @@ public class StageManager : MonoBehaviour
         if (tutorialPanel != null) tutorialPanel.SetActive(true);
         if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
-        if (clearPanel != null) clearPanel.SetActive(false); // ▼▼▼ この行を追加 ▼▼▼
+        if (clearPanel != null) clearPanel.SetActive(false);
         if (statusText != null) statusText.text = "停車中";
         if (stationNameText != null) stationNameText.text = "";
+        CurrentInertia = Vector2.zero;
         Time.timeScale = 0f;
         UpdateCongestionUI();
     }
@@ -167,6 +174,7 @@ public class StageManager : MonoBehaviour
     {
         if (statusText != null) statusText.text = "走行中";
         if (stationNameText != null) stationNameText.text = "";
+        CurrentInertia = Vector2.zero;
 
         // 設定された駅イベントを順番に処理していく
         foreach (var station in stationEvents)
@@ -177,18 +185,18 @@ public class StageManager : MonoBehaviour
             yield return StartCoroutine(ArrivalSequenceCoroutine(station));
         }
 
-        // --- ▼▼▼ ここから最終走行のロジック ▼▼▼ ---
-
         // 全ての駅を通過後、終点までの最終走行を開始
         if (statusText != null) statusText.text = "走行中";
         if (stationNameText != null) stationNameText.text = "次は 終点";
+        CurrentInertia = Vector2.zero; // 走行中なので慣性をゼロに
 
         // 終点に到着するまで待機
         yield return new WaitForSeconds(finalRunDuration);
 
         // 終点到着の演出
         if (stationNameText != null) stationNameText.text = "終点 まもなく到着";
-        if (statusText != null) statusText.text = "減速中";
+        if (statusText != null) statusText.text = ">>>減速中>>>";
+        CurrentInertia = new Vector2(-inertiaForce, 0); // 減速中なので左向きの慣性
 
         // 停車演出
         yield return new WaitForSeconds(delayBeforeSpawn);
@@ -208,7 +216,8 @@ public class StageManager : MonoBehaviour
     {
         // ① TMPGUIを分離して変更
         if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
-        if (statusText != null) statusText.text = "減速中";
+        if (statusText != null) statusText.text = ">>>減速中>>>";
+        CurrentInertia = new Vector2(-inertiaForce, 0); // 減速中なので左向きの慣性
 
         // ② サウンド再生までの待機
         yield return new WaitForSeconds(delayBeforeSpawn);
@@ -234,13 +243,15 @@ public class StageManager : MonoBehaviour
 
         // ④ 駅名表示を消し、状態を「加速中」に変更
         if (stationNameText != null) stationNameText.text = "";
-        if (statusText != null) statusText.text = "加速中";
+        if (statusText != null) statusText.text = "<<<加速中<<<";
+        CurrentInertia = new Vector2(inertiaForce, 0); // 加速中なので右向きの慣性
 
         // 加速時間
         yield return new WaitForSeconds(accelerationTime);
 
         // ⑤ 状態を「走行中」に変更
         if (statusText != null) statusText.text = "走行中";
+        CurrentInertia = Vector2.zero; // 走行中なので慣性をゼロに
     }
 
     private void TriggerStageClear()
