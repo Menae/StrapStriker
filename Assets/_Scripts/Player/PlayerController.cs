@@ -520,14 +520,14 @@ private void ChangeState(PlayerState newState)
     {
         if (other.gameObject.CompareTag("NPC"))
         {
-            // 接触したオブジェクトとその親からNPCControllerを探す
             NPCController npc = other.gameObject.GetComponentInParent<NPCController>();
-            if (npc != null && (currentState == PlayerState.Launched || currentState == PlayerState.Swaying || currentState == PlayerState.Grabbing))
+
+            if (npc != null)
             {
                 // 威力の計算用に、まず現在の速度をベースとする
                 Vector2 impactVelocity = rb.velocity;
 
-                // もしスイング中なら、SwayPowerを威力に加算する
+                // もしスイング中なら、SwayPowerを威力に加算する（この部分は維持）
                 if (currentState == PlayerState.Swaying)
                 {
                     Vector2 powerBonus = impactVelocity.normalized * swayPower * swayImpactPowerBonus;
