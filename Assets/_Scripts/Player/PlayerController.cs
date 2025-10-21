@@ -60,6 +60,13 @@ public class PlayerController : MonoBehaviour
     [Tooltip("スイング中の衝突時に、Sway Powerを威力に上乗せする際の倍率")]
     public float swayImpactPowerBonus = 0.5f;
 
+    [Header("接地判定")]
+    [Tooltip("接地判定レイキャストの発射地点")]
+    public Transform feetPosition;
+    [Tooltip("地面とみなすレイヤー")]
+    public LayerMask groundLayer;
+    [Tooltip("地面を検知するレイキャストの距離")]
+    public float groundCheckDistance = 0.1f;
 
     [Header("慣性設定")]
     [Tooltip("慣性力が発射に与えるボーナスの大きさ")]
@@ -100,6 +107,16 @@ public class PlayerController : MonoBehaviour
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         playerAnim = GetComponentInChildren<Animator>();
 
+        // --- このデバッグログを追加 ---
+        if (playerAnim == null)
+        {
+            Debug.LogError("Playerの子オブジェクトにAnimatorが見つかりません！ playerAnimがnullです。");
+        }
+        else
+        {
+            Debug.Log("<color=cyan>Animatorの参照取得に成功しました。</color>");
+        }
+
         // シーン内にあるStageManagerを探す
         stageManager = FindObjectOfType<StageManager>();
         if (stageManager == null)
@@ -119,13 +136,10 @@ public class PlayerController : MonoBehaviour
     {
         if (stageManager != null && stageManager.CurrentState != StageManager.GameState.Playing)
         {
-            return; // 即座にメソッドを抜ける
+            return;
         }
 
-        // --- ステップ1: 全ての入力を1つの状態に統一する ---
         bool isGripInputActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
-
-        // --- ステップ2: 現在の状態で有効な入力処理を実行 ---
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
 
@@ -148,10 +162,11 @@ public class PlayerController : MonoBehaviour
                 break;
         }
 
-        // --- ステップ3: 来フレームのために、今の状態を記録しておく ---
         wasGripInputActiveLastFrame = isGripInputActive;
 
-        // DEBUG
+        // 接地判定を毎フレーム呼び出して、コンソールとSceneビューで確認する
+        IsGrounded();
+
         if (Input.GetKeyDown(KeyCode.E))
         {
             playerAnim.SetTrigger("Jump");
@@ -358,31 +373,39 @@ private void ChangeState(PlayerState newState)
         HangingStrap nearestStrap = HangingStrapManager.FindNearestStrap(transform.position, maxGrabDistance);
         if (nearestStrap != null)
         {
-            // 空中(Launched)から再掴みした場合、既存の速度を減衰させて無限加速を防ぐ
-            if (currentState == PlayerState.Launched)
+            Debug.Log("<color=green>成功: " + nearestStrap.name + " を掴みます！</color>");
+
+            bool isPlayerGrounded = IsGrounded();
+            if (!isPlayerGrounded)
             {
                 rb.velocity *= aerialRecatchDampener;
                 rb.angularVelocity = 0f;
             }
-
-            ChangeState(PlayerState.Grabbing);
             currentStrap = nearestStrap;
-            rb.constraints = RigidbodyConstraints2D.None; // 回転を許可
-
+            rb.constraints = RigidbodyConstraints2D.None;
             activeHingeJoint = gameObject.AddComponent<HingeJoint2D>();
-            activeHingeJoint.connectedBody = currentStrap.GetComponent<Rigidbody2D>();
+            activeHingeJoint.connectedBody = nearestStrap.GetComponent<Rigidbody2D>();
             activeHingeJoint.autoConfigureConnectedAnchor = false;
             activeHingeJoint.anchor = transform.InverseTransformPoint(handPoint.position);
-            activeHingeJoint.connectedAnchor = currentStrap.grabPoint.localPosition;
-
-            // 掴んだ瞬間のヨー角を初期値として記録
+            activeHingeJoint.connectedAnchor = nearestStrap.grabPoint.localPosition;
             if (joycon != null)
             {
                 lastYaw = joycon.GetVector().eulerAngles.y;
             }
-
             if (grabToSwayCoroutine != null) StopCoroutine(grabToSwayCoroutine);
-            grabToSwayCoroutine = StartCoroutine(TransitionToSwayingRoutine());
+            if (isPlayerGrounded)
+            {
+                ChangeState(PlayerState.Grabbing);
+                grabToSwayCoroutine = StartCoroutine(TransitionToSwayingRoutine());
+            }
+            else
+            {
+                ChangeState(PlayerState.Swaying);
+            }
+        }
+        else
+        {
+            Debug.Log("<color=red>失敗: 掴める範囲 (" + maxGrabDistance + "m) につり革がありません。</color>");
         }
     }
 
@@ -409,12 +432,22 @@ private void ChangeState(PlayerState newState)
                 break;
 
             case PlayerState.Swaying:
-                // パワーが不十分なら発射せず、ただの落下(Idle)に
+                // パワーが不十分な場合
                 if (swayPower < MinLaunchPower)
                 {
-                    ChangeState(PlayerState.Idle);
+                    // ただし、空中にいる場合は落下中も姿勢を制御させたいのでLaunched状態にする
+                    if (!IsGrounded())
+                    {
+                        ChangeState(PlayerState.Launched);
+                    }
+                    // 地面にいる場合は、そのままIdle状態になる
+                    else
+                    {
+                        ChangeState(PlayerState.Idle);
+                    }
+
                     swayPower = 0f;
-                    return;
+                    return; // 発射処理は行わずに終了
                 }
 
                 // パワーが十分なら発射
@@ -482,6 +515,27 @@ private void ChangeState(PlayerState newState)
                 npc.TakeImpact(impactVelocity, knockbackMultiplier);
             }
         }
+    }
+
+    private bool IsGrounded()
+    {
+        RaycastHit2D hit = Physics2D.Raycast(feetPosition.position, Vector2.down, groundCheckDistance, groundLayer);
+
+        // Sceneビューにレイを可視化する（緑 = ヒット, 赤 = ミス）
+        Color rayColor = hit ? Color.green : Color.red;
+        Debug.DrawRay(feetPosition.position, Vector2.down * groundCheckDistance, rayColor);
+
+        // コンソールに判定結果を詳しく出力する
+        if (hit.collider != null)
+        {
+            Debug.Log($"<color=green>IsGrounded SUCCESS:</color> レイがオブジェクト「{hit.collider.name}」（レイヤー: {LayerMask.LayerToName(hit.collider.gameObject.layer)}）にヒットしました。IsGroundedは true を返します。");
+        }
+        else
+        {
+            Debug.Log($"<color=red>IsGrounded FAILURE:</color> レイは地面を検知しませんでした。IsGroundedは false を返します。");
+        }
+
+        return hit.collider != null;
     }
 
     // 地面との衝突判定は、トリガーではなく物理的な衝突で行うため、

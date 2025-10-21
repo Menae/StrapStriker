@@ -99,6 +99,7 @@ public class ArduinoInputManager : MonoBehaviour
                 {
                     // 成功したら、静的変数に値を格納
                     GripValue = value;
+                    Debug.Log($"Grip Value: {GripValue}");
                 }
             }
             catch (TimeoutException)
