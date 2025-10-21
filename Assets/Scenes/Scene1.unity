@@ -3709,7 +3709,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   handPoint: {fileID: 1770777878}
-  gripThreshold: 500
+  gripThreshold: 1
   swayForceByAngle: 15
   swayForceByVelocity: 0.1
   swayIncreaseRate: 10
@@ -3735,6 +3735,7 @@ MonoBehaviour:
   groundCheckDistance: 0.5
   inertiaBonusMultiplier: 2
   inertiaSwingBonus: 1.5
+  gripReleaseGracePeriod: 0.1
   debugMode: 0
 --- !u!61 &1082202013
 BoxCollider2D:

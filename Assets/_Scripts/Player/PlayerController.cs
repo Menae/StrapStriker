@@ -74,6 +74,10 @@ public class PlayerController : MonoBehaviour
     [Tooltip("慣性がスイングに与える影響の大きさ")]
     public float inertiaSwingBonus = 5f;
 
+    [Header("入力の安定化")]
+    [Tooltip("握力が0になっても、ここで設定した秒数だけ掴み続ける（センサーのノイズ対策）")]
+    public float gripReleaseGracePeriod = 0.1f;
+
     [Header("デバッグ設定")]
     [SerializeField] private bool debugMode = false;
 
@@ -96,6 +100,7 @@ public class PlayerController : MonoBehaviour
     // --- Input Handling ---
     private bool wasGripInputActiveLastFrame = false;
     private float lastYaw = 0f; // Joy-Conの前回のヨー角
+    private float timeSinceGripLow = 0f; // 握力が弱い状態が続いている時間
 
     // --- Coroutine Management ---
     private Coroutine grabToSwayCoroutine;
@@ -139,7 +144,26 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        bool isGripInputActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
+        // 1. センサーやキーボードからの「生」の入力状態を読み取る
+        bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
+
+        // 2. 生の入力状態に基づいて、猶予タイマーを更新する
+        if (isRawGripSignalActive)
+        {
+            // 信号がONなら、タイマーをリセット
+            timeSinceGripLow = 0f;
+        }
+        else
+        {
+            // 信号がOFFなら、タイマーを進める
+            timeSinceGripLow += Time.deltaTime;
+        }
+
+        // 3. 安定化された最終的な「掴んでいる」状態を決定する
+        //    信号がONか、または信号がOFFでも猶予期間内なら「掴んでいる」とみなす
+        bool isGripInputActive = isRawGripSignalActive || (timeSinceGripLow < gripReleaseGracePeriod);
+
+        // 4. 前フレームとの状態比較から「掴んだ瞬間」「離した瞬間」を判定する（この部分は変更なし）
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
 
