@@ -61,6 +61,8 @@ public class StageManager : MonoBehaviour
     public TextMeshProUGUI statusText;
     public TextMeshProUGUI stationNameText;
     public TextMeshProUGUI congestionRateText;
+    [Tooltip("倒したNPCの数を表示するTextMeshProコンポーネント")]
+    public TextMeshProUGUI defeatedNpcCountText;
 
     [Header("駅到着演出の設定")]
     [Tooltip("駅到着時の効果音")]
@@ -79,6 +81,7 @@ public class StageManager : MonoBehaviour
 
     private AudioSource audioSource;
     private float currentCongestionRate;
+    private int defeatedNpcCount;
 
     void Awake()
     {
@@ -98,6 +101,9 @@ public class StageManager : MonoBehaviour
         CurrentInertia = Vector2.zero;
         Time.timeScale = 0f;
         UpdateCongestionUI();
+
+        defeatedNpcCount = 0;
+        UpdateDefeatedNpcCountUI();
     }
 
     void Update()
@@ -128,12 +134,24 @@ public class StageManager : MonoBehaviour
         StartCoroutine(StageProgressionCoroutine());
     }
 
-    // 混雑率を更新するための公開メソッド
-    public void UpdateCongestionOnNpcDefeated()
+    public void OnNpcDefeated()
     {
-        // 常に混雑率を更新するようにする
+        // 混雑率を更新
         currentCongestionRate -= rateDecreasePerNpc;
         UpdateCongestionUI();
+
+        // 倒したNPCの数を加算してUIを更新
+        defeatedNpcCount++;
+        UpdateDefeatedNpcCountUI();
+    }
+
+    // 倒したNPCの数UIを更新するメソッド
+    private void UpdateDefeatedNpcCountUI()
+    {
+        if (defeatedNpcCountText != null)
+        {
+            defeatedNpcCountText.text = defeatedNpcCount.ToString();
+        }
     }
 
     // UIのテキストを更新する
@@ -141,7 +159,7 @@ public class StageManager : MonoBehaviour
     {
         if (congestionRateText != null)
         {
-            congestionRateText.text = $"{Mathf.CeilToInt(currentCongestionRate)}%";
+            congestionRateText.text = $"{Mathf.CeilToInt(currentCongestionRate)}";
         }
     }
 

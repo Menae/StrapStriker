@@ -4,13 +4,14 @@ using UnityEngine;
 
 public class PlayerController : MonoBehaviour
 {
+    // ゲーム内でプレイヤーが取りうる状態を定義
     private enum PlayerState { Idle, Grabbing, Swaying, Launched }
-    private PlayerState currentState = PlayerState.Idle;
 
     [Header("必須コンポーネント")]
+    [Tooltip("プレイヤーの手の位置。つり革を掴む際の基点となります。")]
     public Transform handPoint;
 
-    [Header("Arduino設定")]
+    [Header("入力設定")]
     [Tooltip("この値以上の握力でつり革を掴みます")]
     public int gripThreshold = 500;
 
@@ -25,12 +26,10 @@ public class PlayerController : MonoBehaviour
     public float swayDecayRate = 5f;
     [Tooltip("蓄積できるパワーの最大値")]
     public float maxSwayPower = 100f;
-    [Tooltip("パワーを発射の力に変換する際の倍率")]
-    public float launchMultiplier = 50f;
-    [Tooltip("スイング成功と判定されるJoy-Conの回転速度のしきい値")]
-    public float swingVelocityThreshold = 15f;
     [Tooltip("溜まったパワーがスイングの見た目の大きさに影響を与える度合い")]
     public float powerToSwingMultiplier = 0.1f;
+    [Tooltip("スイング成功と判定されるJoy-Conの回転速度のしきい値")]
+    public float swingVelocityThreshold = 15f;
 
     [Header("スイング角度設定")]
     [Tooltip("左スイングと認識される最大角度")]
@@ -42,17 +41,25 @@ public class PlayerController : MonoBehaviour
     [Tooltip("右スイングと認識される最大角度")]
     public float rightSwingAngleMax = 270f;
 
-    [Header("バランス調整")]
-    [Tooltip("掴める最大距離")]
-    public float maxGrabDistance = 8.0f;
+    [Header("発射と空中制御")]
+    [Tooltip("パワーを発射の力に変換する際の倍率")]
+    public float launchMultiplier = 50f;
+    [Tooltip("空中で体を直立に戻す回転の速さ")]
+    public float aerialRotationSpeed = 5f;
     [Tooltip("空中で再掴みした際に、既存の速度をどのくらい減衰させるか (0.5 = 50%に)")]
     [Range(0f, 1f)]
     public float aerialRecatchDampener = 0.5f;
-    [Tooltip("発射後、体をまっすぐに戻すのにかかる時間")]
-    public float straightenDuration = 0.5f;
 
-    [Header("NPCインタラクション設定")]
+    [Header("インタラクション設定")]
+    [Tooltip("NPCに衝突した際のノックバックの強さ")]
     public float knockbackMultiplier = 5.0f;
+    [Tooltip("つり革を掴める最大距離")]
+    public float maxGrabDistance = 8.0f;
+    [Tooltip("掴んでからスイング可能になるまでのアニメーション時間")]
+    public float grabToSwayTransitionTime = 0.25f;
+    [Tooltip("スイング中の衝突時に、Sway Powerを威力に上乗せする際の倍率")]
+    public float swayImpactPowerBonus = 0.5f;
+
 
     [Header("慣性設定")]
     [Tooltip("慣性力が発射に与えるボーナスの大きさ")]
@@ -60,26 +67,31 @@ public class PlayerController : MonoBehaviour
     [Tooltip("慣性がスイングに与える影響の大きさ")]
     public float inertiaSwingBonus = 5f;
 
-
-    [Header("デバッグ用")]
+    [Header("デバッグ設定")]
     [SerializeField] private bool debugMode = false;
 
-    // --- 内部変数 ---
+    private const float MinLaunchPower = 1f; // 発射に最低限必要なパワー
+
+    // --- Component References ---
     private Rigidbody2D rb;
-    private float swayPower = 0f;
-    private HangingStrap currentStrap = null;
-    private HingeJoint2D activeHingeJoint;
-    private Coroutine straighteningCoroutine;
-    private Coroutine grabToSwayCoroutine;
-    private float lastYaw = 0f;
-    private bool wasGripInputActiveLastFrame = false;
     private Animator playerAnim;
     private StageManager stageManager;
-    private float lastFacingDirection = 1f; // 最後に見ていた方向(1=右, -1=左)最初は右向き。
-
-    // --- Joy-Con関連の内部変数 ---
+    private HingeJoint2D activeHingeJoint;
     private List<Joycon> joycons;
     private Joycon joycon;
+
+    // --- Player State ---
+    private PlayerState currentState = PlayerState.Idle;
+    private float swayPower = 0f;
+    private HangingStrap currentStrap = null;
+    private float lastFacingDirection = 1f; // 最後に見ていた向き(1=右, -1=左)
+
+    // --- Input Handling ---
+    private bool wasGripInputActiveLastFrame = false;
+    private float lastYaw = 0f; // Joy-Conの前回のヨー角
+
+    // --- Coroutine Management ---
+    private Coroutine grabToSwayCoroutine;
 
 
     void Start()
@@ -113,22 +125,27 @@ public class PlayerController : MonoBehaviour
         // --- ステップ1: 全ての入力を1つの状態に統一する ---
         bool isGripInputActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
 
-        // --- ステップ2: 状態が切り替わった「瞬間」を検知する ---
-        // もし今フレームで「掴み始めた」なら
-        if (isGripInputActive && !wasGripInputActiveLastFrame)
+        // --- ステップ2: 現在の状態で有効な入力処理を実行 ---
+        bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
+        bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
+
+        switch (currentState)
         {
-            if (currentState == PlayerState.Idle || currentState == PlayerState.Launched)
-            {
-                GrabNearestStrap();
-            }
-        }
-        // もし今フレームで「離し始めた」なら
-        else if (!isGripInputActive && wasGripInputActiveLastFrame)
-        {
-            if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
-            {
-                ReleaseStrap();
-            }
+            case PlayerState.Idle:
+            case PlayerState.Launched:
+                if (gripPressed)
+                {
+                    GrabNearestStrap();
+                }
+                break;
+
+            case PlayerState.Grabbing:
+            case PlayerState.Swaying:
+                if (gripReleased)
+                {
+                    ReleaseStrap();
+                }
+                break;
         }
 
         // --- ステップ3: 来フレームのために、今の状態を記録しておく ---
@@ -163,6 +180,22 @@ public class PlayerController : MonoBehaviour
         {
             ExecuteSwayingPhysics();
         }
+        // [ここから新しいロジック] 発射(Launched)状態の時、滑らかに体を直立させる
+        else if (currentState == PlayerState.Launched)
+        {
+            // 1. 目標の回転を定義する (Z軸回転0度、つまり直立)
+            Quaternion targetRotation = Quaternion.identity;
+
+            // 2. 現在の回転から目標の回転まで、指定した速度で滑らかに補間する
+            Quaternion newRotation = Quaternion.Slerp(
+                rb.transform.rotation,      // 現在の回転
+                targetRotation,             // 目標の回転
+                aerialRotationSpeed * Time.fixedDeltaTime // 回転の速さ
+            );
+
+            // 3. 物理エンジンと協調して、計算した新しい回転を適用する
+            rb.MoveRotation(newRotation);
+        }
 
         // デバッグモード中は減衰率を0に、そうでなければ通常の値を使用する
         float currentDecayRate = debugMode ? 0f : swayDecayRate;
@@ -181,11 +214,18 @@ public class PlayerController : MonoBehaviour
         HandleDirection();
     }
 
-    private void ChangeState(PlayerState newState)
+private void ChangeState(PlayerState newState)
+{
+    if (currentState == newState) return;
+
+    // [提案] 状態がいつ、どのように変わったかログに出力する
+    if (debugMode)
     {
-        if (currentState == newState) return;
-        currentState = newState;
+        Debug.Log($"<color=cyan>State Change:</color> {currentState} -> <color=yellow>{newState}</color>");
     }
+
+    currentState = newState;
+}
 
     private void HandleDirection()
     {
@@ -195,14 +235,18 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        // キャラクターの水平方向の速度を取得
-        float horizontalVelocity = rb.velocity.x;
-
-        // わずかな動きは無視し、一定以上の速度が出ている時だけ向きを更新
-        if (Mathf.Abs(horizontalVelocity) > 0.1f)
+        // 空中(Launched)状態では、向きの更新を行わない
+        if (currentState != PlayerState.Launched)
         {
-            // 速度の方向に応じて、向き(-1か1)を決定
-            lastFacingDirection = Mathf.Sign(horizontalVelocity);
+            // キャラクターの水平方向の速度を取得
+            float horizontalVelocity = rb.velocity.x;
+
+            // わずかな動きは無視し、一定以上の速度が出ている時だけ向きを更新
+            if (Mathf.Abs(horizontalVelocity) > 0.1f)
+            {
+                // 速度の方向に応じて、向き(-1か1)を決定
+                lastFacingDirection = Mathf.Sign(horizontalVelocity);
+            }
         }
 
         // Animatorに現在の向きを伝える
@@ -317,7 +361,6 @@ public class PlayerController : MonoBehaviour
             // 空中(Launched)から再掴みした場合、既存の速度を減衰させて無限加速を防ぐ
             if (currentState == PlayerState.Launched)
             {
-                if (straighteningCoroutine != null) StopCoroutine(straighteningCoroutine);
                 rb.velocity *= aerialRecatchDampener;
                 rb.angularVelocity = 0f;
             }
@@ -345,108 +388,106 @@ public class PlayerController : MonoBehaviour
 
     private void ReleaseStrap()
     {
+        // 掴み->スイング移行中のコルーチンが動いていれば止める
         if (grabToSwayCoroutine != null)
         {
             StopCoroutine(grabToSwayCoroutine);
             grabToSwayCoroutine = null;
         }
 
-        if (currentState == PlayerState.Idle || currentState == PlayerState.Launched) return;
-
-        // まず、どの状態からでも共通の物理的な接続解除を行う
+        // 物理的な接続を解除 (共通処理)
         Destroy(activeHingeJoint);
         activeHingeJoint = null;
         currentStrap = null;
 
-        // ジャンプ中に離した場合 (素早い入力)
-        if (currentState == PlayerState.Grabbing)
+        // 状態に応じた処理
+        switch (currentState)
         {
-            ChangeState(PlayerState.Idle);
-            swayPower = 0f;
-        }
-        // スイング中に離した場合
-        else if (currentState == PlayerState.Swaying)
-        {
-            // パワーがほとんど無い場合は、Idle状態に戻して落下させる
-            if (swayPower < 1f)
-            {
+            case PlayerState.Grabbing:
                 ChangeState(PlayerState.Idle);
                 swayPower = 0f;
-            }
-            // パワーが十分にある場合は、発射処理を行う
-            else
-            {
-                Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");
+                break;
 
+            case PlayerState.Swaying:
+                // パワーが不十分なら発射せず、ただの落下(Idle)に
+                if (swayPower < MinLaunchPower)
+                {
+                    ChangeState(PlayerState.Idle);
+                    swayPower = 0f;
+                    return;
+                }
+
+                // パワーが十分なら発射
+                Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");
                 ChangeState(PlayerState.Launched);
                 rb.constraints = RigidbodyConstraints2D.None;
 
+                // 発射前にスイングの回転をリセットし、体勢を安定させる
+                rb.angularVelocity = 0f;
+
                 Vector2 currentVelocity = rb.velocity.normalized;
                 if (currentVelocity.sqrMagnitude < 0.1f) { currentVelocity = Vector2.up; }
+
+                // 発射の向きから、着地するまでのキャラクターの向きを決定する
+                lastFacingDirection = Mathf.Sign(currentVelocity.x);
+                // もし真上に飛んだなどで水平方向の向きがない場合は、以前の向きを維持する
+                if (Mathf.Abs(currentVelocity.x) < 0.01f)
+                {
+                    // lastFacingDirection は以前の値のまま
+                }
 
                 Vector2 launchBoost = currentVelocity * swayPower * launchMultiplier;
                 rb.AddForce(launchBoost, ForceMode2D.Impulse);
 
                 swayPower = 0f;
-
-                if (straighteningCoroutine != null) StopCoroutine(straighteningCoroutine);
-                straighteningCoroutine = StartCoroutine(StraightenUpInAir());
-            }
-        }
-    }
-
-    /// <summary>
-    /// Jumpアニメーションが終了した時に、アニメーションイベントから呼び出される
-    /// </summary>
-    public void OnJumpAnimationFinished()
-    {
-        // イベントが呼ばれたことをログに出力
-        Debug.Log($"<color=yellow>Frame {Time.frameCount}: OnJumpAnimationFinished event received. Current state is {currentState}.</color>");
-        if (currentState == PlayerState.Grabbing)
-        {
-            ChangeState(PlayerState.Swaying);
+                break;
         }
     }
 
     private IEnumerator TransitionToSwayingRoutine()
     {
-        // Jumpアニメーションが再生されるのを少しだけ待つ
-        yield return new WaitForSeconds(0.2f);
+        // アニメーションの再生が終わる想定時間まで待機
+        yield return new WaitForSeconds(grabToSwayTransitionTime);
 
-        // もし、待った後もまだ掴んでいる状態(Grabbing)なら、Swayingに移行する
+        // 待機後もまだ掴み状態(Grabbing)が継続している場合のみ、Swayingに移行する
+        // (待っている間にプレイヤーが掴むのをやめたケースに対応)
         if (currentState == PlayerState.Grabbing)
         {
             ChangeState(PlayerState.Swaying);
         }
+        // コルーチン自身の参照をクリア
         grabToSwayCoroutine = null;
     }
 
-    private IEnumerator StraightenUpInAir()
+    public void HandleNpcCollision(Collider2D other)
     {
-        float startRotation = rb.rotation;
-        float elapsedTime = 0f;
-
-        while (elapsedTime < straightenDuration)
+        if (other.gameObject.CompareTag("NPC"))
         {
-            if (currentState != PlayerState.Launched) yield break; // もし着地などしたら中断
-            elapsedTime += Time.deltaTime;
-            rb.rotation = Mathf.LerpAngle(startRotation, 0f, elapsedTime / straightenDuration);
-            yield return null;
-        }
-        if (currentState == PlayerState.Launched) rb.rotation = 0f;
-    }
-
-    void OnCollisionEnter2D(Collision2D collision)
-    {
-        if (collision.gameObject.CompareTag("NPC"))
-        {
-            NPCController npc = collision.gameObject.GetComponent<NPCController>();
+            // 接触したオブジェクトとその親からNPCControllerを探す
+            NPCController npc = other.gameObject.GetComponentInParent<NPCController>();
             if (npc != null && (currentState == PlayerState.Launched || currentState == PlayerState.Swaying || currentState == PlayerState.Grabbing))
             {
-                npc.TakeImpact(rb.velocity, knockbackMultiplier);
+                // 威力の計算用に、まず現在の速度をベースとする
+                Vector2 impactVelocity = rb.velocity;
+
+                // もしスイング中なら、SwayPowerを威力に加算する
+                if (currentState == PlayerState.Swaying)
+                {
+                    Vector2 powerBonus = impactVelocity.normalized * swayPower * swayImpactPowerBonus;
+                    impactVelocity += powerBonus;
+                    Debug.Log($"<color=red>スイングインパクト！</color> パワーボーナス: {powerBonus.magnitude}");
+                }
+
+                // 最終的に計算された威力でNPCにインパクトを与える
+                npc.TakeImpact(impactVelocity, knockbackMultiplier);
             }
         }
+    }
 
+    // 地面との衝突判定は、トリガーではなく物理的な衝突で行うため、
+    // このメソッドは削除せず、そのまま残してください。
+    void OnCollisionEnter2D(Collision2D collision)
+    {
         // 地面との衝突判定
         if (collision.gameObject.CompareTag("Ground"))
         {
@@ -454,11 +495,6 @@ public class PlayerController : MonoBehaviour
             if (activeHingeJoint == null)
             {
                 ChangeState(PlayerState.Idle);
-                if (straighteningCoroutine != null)
-                {
-                    StopCoroutine(straighteningCoroutine);
-                    straighteningCoroutine = null;
-                }
                 rb.rotation = 0f;
                 rb.constraints = RigidbodyConstraints2D.FreezeRotation;
             }

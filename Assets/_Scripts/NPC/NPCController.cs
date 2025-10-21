@@ -189,7 +189,7 @@ public class NPCController : MonoBehaviour
         // 司令塔に報告
         if (stageManager != null)
         {
-            stageManager.UpdateCongestionOnNpcDefeated();
+            stageManager.OnNpcDefeated();
         }
         else
         {
