@@ -8,9 +8,9 @@ public class ArduinoInputManager : MonoBehaviour
     // --- シングルトンインスタンス ---
     public static ArduinoInputManager instance;
 
-    [Header("シリアルポート設定")]
-    [Tooltip("Arduinoが接続されているCOMポート名 (例: COM3)")]
-    public string portName = "COM3";
+    [Header("フォールバック設定")]
+    [Tooltip("自動検出が失敗した場合に、接続を試みるCOMポート名")]
+    public string fallbackPortName = "COM3";
     [Tooltip("Arduinoと合わせるボーレート (通信速度)")]
     public int baudRate = 9600;
 
@@ -45,43 +45,85 @@ public class ArduinoInputManager : MonoBehaviour
 
     private void ConnectToArduino()
     {
-        // PCで利用可能なCOMポートの全リストを取得
         string[] availablePorts = SerialPort.GetPortNames();
-
-        // 指定したポートがリストに存在するかどうかを確認
-        bool portExists = false;
-        foreach (string openPort in availablePorts)
+        if (availablePorts.Length == 0)
         {
-            if (openPort == portName)
-            {
-                portExists = true;
-                break;
-            }
-        }
-
-        // もし指定したポートが存在しなければ、警告を出してメソッドを抜ける
-        if (!portExists)
-        {
-            Debug.LogWarning($"<color=orange>Port '{portName}' not found. Arduino input is disabled.</color>");
+            Debug.LogWarning("No COM ports found.");
             return;
         }
 
-        // ポートが存在する場合のみ、接続を試みる
-        try
+        // ハンドシェイクによる自動検出を試みる
+        Debug.Log($"Phase 1: Found {availablePorts.Length} ports. Searching for Arduino via handshake...");
+        foreach (string port in availablePorts)
         {
-            serialPort = new SerialPort(portName, baudRate);
-            serialPort.ReadTimeout = 1000;
-            serialPort.Open();
+            SerialPort tempPort = new SerialPort(port, baudRate);
+            tempPort.ReadTimeout = 200;
+            try
+            {
+                tempPort.Open();
+                tempPort.Write("p");
+                string response = tempPort.ReadLine().Trim();
 
-            isThreadRunning = true;
-            readThread = new Thread(ReadSerialData);
-            readThread.Start();
-
-            Debug.Log($"<color=cyan>Arduino on {portName} connected successfully!</color>");
+                if (response == "STRAP_STRIKER_GRIP")
+                {
+                    Debug.Log($"<color=cyan>SUCCESS:</color> Arduino found on {port} via handshake!");
+                    serialPort = tempPort;
+                    isThreadRunning = true;
+                    readThread = new Thread(ReadSerialData);
+                    readThread.Start();
+                    return; // 接続に成功したので、ここで処理を終了
+                }
+                else
+                {
+                    tempPort.Close();
+                }
+            }
+            catch (Exception)
+            {
+                if (tempPort.IsOpen) tempPort.Close();
+            }
         }
-        catch (Exception e)
+
+        // 自動検出が失敗した場合、フォールバック接続を試みる
+        Debug.LogWarning($"<color=orange>Phase 1 FAILED:</color> Handshake failed on all ports. Trying fallback to '{fallbackPortName}'.");
+
+        // フォールバック用のポート名が指定されており、かつ利用可能なポートリストに存在するかチェック
+        bool portExists = false;
+        if (!string.IsNullOrEmpty(fallbackPortName))
         {
-            Debug.LogError($"<color=red>Error connecting to Arduino: {e.Message}</color>");
+            foreach (string port in availablePorts)
+            {
+                if (port == fallbackPortName)
+                {
+                    portExists = true;
+                    break;
+                }
+            }
+        }
+
+        if (portExists)
+        {
+            try
+            {
+                // ハンドシェイクなしで、指定されたポートに直接接続を試みる
+                serialPort = new SerialPort(fallbackPortName, baudRate);
+                serialPort.ReadTimeout = 1000;
+                serialPort.Open();
+
+                isThreadRunning = true;
+                readThread = new Thread(ReadSerialData);
+                readThread.Start();
+
+                Debug.Log($"<color=cyan>SUCCESS:</color> Connected to fallback port {fallbackPortName}!");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"<color=red>Phase 2 FAILED:</color> Could not connect to fallback port '{fallbackPortName}'. Error: {e.Message}");
+            }
+        }
+        else
+        {
+            Debug.LogError($"<color=red>Phase 2 FAILED:</color> Fallback port '{fallbackPortName}' not found or not specified.");
         }
     }
 

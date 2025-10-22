@@ -48,7 +48,6 @@ public class StageManager : MonoBehaviour
     [Tooltip("NPCが1人減るごとに、何%混雑率が下がるか")]
     public float rateDecreasePerNpc = 1.5f;
 
-
     [Header("ステージ設定")]
     [Tooltip("このステージの駅イベントリスト。順番に設定してください。")]
     public List<StationEvent> stationEvents;
@@ -61,8 +60,15 @@ public class StageManager : MonoBehaviour
     public TextMeshProUGUI statusText;
     public TextMeshProUGUI stationNameText;
     public TextMeshProUGUI congestionRateText;
-    [Tooltip("倒したNPCの数を表示するTextMeshProコンポーネント")]
     public TextMeshProUGUI defeatedNpcCountText;
+
+    [Header("駅進捗UI設定")]
+    [Tooltip("駅の位置を示す黄色いボールのImageコンポーネント")]
+    public Image yellowBall;
+    [Tooltip("5つの駅アイコンのRectTransformを順番に設定")]
+    public List<RectTransform> stationIconPositions;
+    [Tooltip("YellowBallが点滅する間隔（秒）")]
+    public float blinkInterval = 0.5f;
 
     [Header("駅到着演出の設定")]
     [Tooltip("駅到着時の効果音")]
@@ -73,6 +79,7 @@ public class StageManager : MonoBehaviour
     public float stationStopTime = 5.0f;
     [Tooltip("「加速中」表示から「走行中」表示までの時間")]
     public float accelerationTime = 3.0f;
+
     [Header("最終走行(クリア)の設定")]
     [Tooltip("最後の駅から終点に到着するまでの時間(秒)")]
     public float finalRunDuration = 20f;
@@ -82,10 +89,11 @@ public class StageManager : MonoBehaviour
     private AudioSource audioSource;
     private float currentCongestionRate;
     private int defeatedNpcCount;
+    private int currentStationIndex;
+    private Coroutine blinkingEffectCoroutine;
 
     void Awake()
     {
-        // 自身のAudioSourceコンポーネントを取得
         audioSource = GetComponent<AudioSource>();
     }
 
@@ -108,7 +116,6 @@ public class StageManager : MonoBehaviour
 
     void Update()
     {
-        // プレイ中にESCキーが押されたらポーズを切り替える
         if (CurrentState == GameState.Playing || CurrentState == GameState.Paused)
         {
             if (Input.GetKeyDown(KeyCode.Escape))
@@ -118,34 +125,34 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    // チュートリアルUIのボタンから呼び出すメソッド
     public void StartGame()
     {
         CurrentState = GameState.Playing;
         if (tutorialPanel != null) tutorialPanel.SetActive(false);
         Time.timeScale = 1f;
 
-        // 混雑率を初期化してNPCをスポーン
         currentCongestionRate = initialCongestionRate;
         UpdateCongestionUI();
         NPCManager.instance.SpawnNPCsForCongestion(this, currentCongestionRate);
 
-        // ステージ進行のメインループを開始
+        currentStationIndex = 0;
+        if (yellowBall != null && stationIconPositions.Count > currentStationIndex)
+        {
+            yellowBall.rectTransform.position = stationIconPositions[currentStationIndex].position;
+            StartBlinking();
+        }
+
         StartCoroutine(StageProgressionCoroutine());
     }
 
     public void OnNpcDefeated()
     {
-        // 混雑率を更新
         currentCongestionRate -= rateDecreasePerNpc;
         UpdateCongestionUI();
-
-        // 倒したNPCの数を加算してUIを更新
         defeatedNpcCount++;
         UpdateDefeatedNpcCountUI();
     }
 
-    // 倒したNPCの数UIを更新するメソッド
     private void UpdateDefeatedNpcCountUI()
     {
         if (defeatedNpcCountText != null)
@@ -154,7 +161,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    // UIのテキストを更新する
     private void UpdateCongestionUI()
     {
         if (congestionRateText != null)
@@ -163,7 +169,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    // ゲームオーバー処理
     private void TriggerGameOver()
     {
         CurrentState = GameState.GameOver;
@@ -172,79 +177,77 @@ public class StageManager : MonoBehaviour
         Debug.Log("ゲームオーバー！");
     }
 
-    // UIボタンから呼び出すメソッド
     public void RetryStage()
     {
         Time.timeScale = 1f;
-        // 現在のシーンを再読み込み
         SceneFader.instance.LoadSceneWithFade(SceneManager.GetActiveScene().name);
     }
 
     public void ReturnToTitle()
     {
         Time.timeScale = 1f;
-        // タイトルシーンに遷移
         SceneFader.instance.LoadSceneWithFade("TitleScreen");
     }
 
-    // ステージ進行を管理するメインのコルーチン
     private IEnumerator StageProgressionCoroutine()
     {
         if (statusText != null) statusText.text = "走行中";
         if (stationNameText != null) stationNameText.text = "";
         CurrentInertia = Vector2.zero;
 
-        // 設定された駅イベントを順番に処理していく
         foreach (var station in stationEvents)
         {
-            // 次の駅に到着するまで待機
             yield return new WaitForSeconds(station.timeToArrival);
-            // 駅到着の演出シーケンスを開始し、それが終わるまで待つ
             yield return StartCoroutine(ArrivalSequenceCoroutine(station));
+
+            currentStationIndex++;
+            if (currentStationIndex < stationIconPositions.Count)
+            {
+                if (yellowBall != null)
+                {
+                    yellowBall.rectTransform.position = stationIconPositions[currentStationIndex].position;
+                }
+                StartBlinking();
+            }
         }
 
-        // 全ての駅を通過後、終点までの最終走行を開始
         if (statusText != null) statusText.text = "走行中";
         if (stationNameText != null) stationNameText.text = "次は 終点";
-        CurrentInertia = Vector2.zero; // 走行中なので慣性をゼロに
+        CurrentInertia = Vector2.zero;
 
-        // 終点に到着するまで待機
         yield return new WaitForSeconds(finalRunDuration);
 
-        // 終点到着の演出
         if (stationNameText != null) stationNameText.text = "終点 まもなく到着";
         if (statusText != null) statusText.text = ">>>減速中>>>";
-        CurrentInertia = new Vector2(-inertiaForce, 0); // 減速中なので左向きの慣性
+        CurrentInertia = new Vector2(-inertiaForce, 0);
 
-        // 停車演出
         yield return new WaitForSeconds(delayBeforeSpawn);
         if (arrivalSound != null && arrivalSound.clip != null)
         {
             audioSource.PlayOneShot(arrivalSound.clip, arrivalSound.volume);
         }
+        StopBlinking(); // 終点到着で点滅停止
 
-        // 到着音の1秒後にクリア判定
         yield return new WaitForSeconds(1.0f);
-
         TriggerStageClear();
     }
 
-    // 駅到着時の演出を管理するコルーチン
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
-        // ① TMPGUIを分離して変更
+        // ① まもなく到着アナウンスと減速開始
         if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
         if (statusText != null) statusText.text = ">>>減速中>>>";
-        CurrentInertia = new Vector2(-inertiaForce, 0); // 減速中なので左向きの慣性
+        CurrentInertia = new Vector2(-inertiaForce, 0);
 
-        // ② サウンド再生までの待機
+        // ② 効果音と点滅停止までの待機
         yield return new WaitForSeconds(delayBeforeSpawn);
+        StopBlinking();
         if (finalArrivalSound != null && finalArrivalSound.clip != null)
         {
             audioSource.PlayOneShot(finalArrivalSound.clip, finalArrivalSound.volume);
         }
 
-        // ③ NPCをスポーンさせ、その分混雑率を上げる
+        // ③ NPCをスポーンさせ、混雑率を更新
         int spawnedCount = NPCManager.instance.SpawnNPCs(this, station.npcsToSpawn);
         currentCongestionRate += spawnedCount * rateDecreasePerNpc;
         UpdateCongestionUI();
@@ -253,23 +256,27 @@ public class StageManager : MonoBehaviour
         if (currentCongestionRate >= maxCongestionRate)
         {
             TriggerGameOver();
-            yield break; // コルーチンをここで中断する
+            yield break;
         }
 
-        // 停車時間
+        // ④ 停車状態へ移行
+        if (statusText != null) statusText.text = "停車中";
+        CurrentInertia = Vector2.zero; // 停車中は慣性をゼロに
+
+        // ⑤ 停車時間ぶん待機
         yield return new WaitForSeconds(stationStopTime);
 
-        // ④ 駅名表示を消し、状態を「加速中」に変更
+        // ⑥ 駅名表示を消し、加速状態へ移行
         if (stationNameText != null) stationNameText.text = "";
         if (statusText != null) statusText.text = "<<<加速中<<<";
-        CurrentInertia = new Vector2(inertiaForce, 0); // 加速中なので右向きの慣性
+        CurrentInertia = new Vector2(inertiaForce, 0);
 
-        // 加速時間
+        // ⑦ 加速時間ぶん待機
         yield return new WaitForSeconds(accelerationTime);
 
-        // ⑤ 状態を「走行中」に変更
+        // ⑧ 走行状態へ移行
         if (statusText != null) statusText.text = "走行中";
-        CurrentInertia = Vector2.zero; // 走行中なので慣性をゼロに
+        CurrentInertia = Vector2.zero;
     }
 
     private void TriggerStageClear()
@@ -279,10 +286,8 @@ public class StageManager : MonoBehaviour
         if (stationNameText != null) stationNameText.text = "";
         if (clearPanel != null) clearPanel.SetActive(true);
         Debug.Log("ステージクリア！");
-        // Time.timeScale = 0f; // 必要であれば時間を止める
     }
 
-    // ポーズ機能
     public void TogglePause()
     {
         if (CurrentState == GameState.Paused)
@@ -296,6 +301,45 @@ public class StageManager : MonoBehaviour
             CurrentState = GameState.Paused;
             if (pauseMenuPanel != null) pauseMenuPanel.SetActive(true);
             Time.timeScale = 0f;
+        }
+    }
+
+    private void StartBlinking()
+    {
+        if (blinkingEffectCoroutine != null)
+        {
+            StopCoroutine(blinkingEffectCoroutine);
+        }
+        blinkingEffectCoroutine = StartCoroutine(BlinkingCoroutine());
+    }
+
+    private void StopBlinking()
+    {
+        if (blinkingEffectCoroutine != null)
+        {
+            StopCoroutine(blinkingEffectCoroutine);
+            blinkingEffectCoroutine = null;
+        }
+        if (yellowBall != null)
+        {
+            yellowBall.enabled = true;
+        }
+    }
+
+    private IEnumerator BlinkingCoroutine()
+    {
+        while (true)
+        {
+            if (yellowBall != null)
+            {
+                yellowBall.enabled = false;
+            }
+            yield return new WaitForSeconds(blinkInterval);
+            if (yellowBall != null)
+            {
+                yellowBall.enabled = true;
+            }
+            yield return new WaitForSeconds(blinkInterval);
         }
     }
 }

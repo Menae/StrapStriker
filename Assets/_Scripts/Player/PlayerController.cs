@@ -60,13 +60,16 @@ public class PlayerController : MonoBehaviour
     [Tooltip("スイング中の衝突時に、Sway Powerを威力に上乗せする際の倍率")]
     public float swayImpactPowerBonus = 0.5f;
 
-    [Header("接地判定")]
+    [Header("接地設定")]
     [Tooltip("接地判定レイキャストの発射地点")]
     public Transform feetPosition;
     [Tooltip("地面とみなすレイヤー")]
     public LayerMask groundLayer;
     [Tooltip("地面を検知するレイキャストの距離")]
     public float groundCheckDistance = 0.1f;
+    [Tooltip("着地時のブレーキの強さ。0で即停止、1でブレーキなし。")]
+    [Range(0f, 1f)]
+    public float groundBrakingFactor = 0.1f;
 
     [Header("慣性設定")]
     [Tooltip("慣性力が発射に与えるボーナスの大きさ")]
@@ -219,21 +222,31 @@ public class PlayerController : MonoBehaviour
         {
             ExecuteSwayingPhysics();
         }
-        // [ここから新しいロジック] 発射(Launched)状態の時、滑らかに体を直立させる
         else if (currentState == PlayerState.Launched)
         {
-            // 1. 目標の回転を定義する (Z軸回転0度、つまり直立)
-            Quaternion targetRotation = Quaternion.identity;
-
-            // 2. 現在の回転から目標の回転まで、指定した速度で滑らかに補間する
-            Quaternion newRotation = Quaternion.Slerp(
-                rb.transform.rotation,      // 現在の回転
-                targetRotation,             // 目標の回転
-                aerialRotationSpeed * Time.fixedDeltaTime // 回転の速さ
-            );
-
-            // 3. 物理エンジンと協調して、計算した新しい回転を適用する
-            rb.MoveRotation(newRotation);
+            // もし接地判定がtrueになったら（＝着地寸前なら）
+            if (IsGrounded())
+            {
+                // 状態をアイドルに戻す
+                ChangeState(PlayerState.Idle);
+                // 体を直立に戻す
+                rb.rotation = 0f;
+                // 現在の速度にブレーキをかける
+                rb.velocity = new Vector2(rb.velocity.x * groundBrakingFactor, rb.velocity.y);
+                // 回転を固定する
+                rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+            }
+            else
+            {
+                // まだ空中にいる場合は、従来通り姿勢制御を続ける
+                Quaternion targetRotation = Quaternion.identity;
+                Quaternion newRotation = Quaternion.Slerp(
+                    rb.transform.rotation,
+                    targetRotation,
+                    aerialRotationSpeed * Time.fixedDeltaTime
+                );
+                rb.MoveRotation(newRotation);
+            }
         }
 
         // デバッグモード中は減衰率を0に、そうでなければ通常の値を使用する
@@ -562,20 +575,8 @@ private void ChangeState(PlayerState newState)
         return hit.collider != null;
     }
 
-    // 地面との衝突判定は、トリガーではなく物理的な衝突で行うため、
-    // このメソッドは削除せず、そのまま残してください。
     void OnCollisionEnter2D(Collision2D collision)
     {
-        // 地面との衝突判定
-        if (collision.gameObject.CompareTag("Ground"))
-        {
-            // 物理的につり革に接続されていない場合、地面にいるなら必ずアイドル状態になる
-            if (activeHingeJoint == null)
-            {
-                ChangeState(PlayerState.Idle);
-                rb.rotation = 0f;
-                rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-            }
-        }
+        // 地面との衝突判定ロジックはFixedUpdateに移動したため、ここは空にする
     }
 }
