@@ -96,6 +96,10 @@ public class StageManager : MonoBehaviour
     [Tooltip("シーンのParallaxControllerへの参照")]
     public ParallaxController parallaxController;
 
+    [Header("ドア")]
+    [Tooltip("シーンのDoorスクリプトへの参照")]
+    public DoorManager doorController;
+
     private AudioSource audioSource;
     private float currentCongestionRate;
     private int defeatedNpcCount;
@@ -268,6 +272,11 @@ public class StageManager : MonoBehaviour
         if (finalArrivalSound != null && finalArrivalSound.clip != null)
         {
             audioSource.PlayOneShot(finalArrivalSound.clip, finalArrivalSound.volume);
+        }
+
+        if (doorController != null)
+        {
+            DoorManager.OpenAllDoors();
         }
 
         // ⑤ NPCをスポーンさせ、混雑率を更新
