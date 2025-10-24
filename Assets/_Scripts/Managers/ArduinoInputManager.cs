@@ -138,24 +138,20 @@ public class ArduinoInputManager : MonoBehaviour
         {
             try
             {
-                // Arduinoから送られてきた1行分のデータを読み取る
-                string data = serialPort.ReadLine();
-                // 読み取った文字列を整数に変換しようと試みる
-                if (int.TryParse(data, out int value))
+                // Arduinoから読み取った文字列を整数に変換できたら
+                if (int.TryParse(serialPort.ReadLine(), out int value))
                 {
-                    // 成功したら、静的変数に値を格納
+                    // 静的変数に値を格納するだけ。Unityの命令は一切呼ばない。
                     GripValue = value;
-                    Debug.Log($"Grip Value: {GripValue}");
                 }
             }
             catch (TimeoutException)
             {
                 // データが来ていない場合はタイムアウトするが、正常な動作なので何もしない
             }
-            catch (Exception e)
+            catch (Exception)
             {
-                // その他のエラーが発生した場合
-                Debug.LogWarning($"Error reading from serial port: {e.Message}");
+                // ポートが閉じた時などにエラーが出るが、スレッド終了時には正常なので無視してOK
             }
         }
     }
@@ -163,11 +159,9 @@ public class ArduinoInputManager : MonoBehaviour
     // ゲーム終了時に呼ばれる処理
     void OnDestroy()
     {
-        // スレッドにループを抜けさせるという合図を送る
         isThreadRunning = false;
 
-        // スレッドが終了するのを待つ前にシリアルポートを強制的に閉じる。
-        // これにより、ReadLine()で待機中のスレッドがエラーで叩き起こされ、ループを抜けられるようになる。
+        // スレッドが終了するのを待つ「前」に、シリアルポートを強制的に閉じる
         if (serialPort != null && serialPort.IsOpen)
         {
             try
@@ -175,16 +169,15 @@ public class ArduinoInputManager : MonoBehaviour
                 serialPort.Close();
                 Debug.Log("<color=cyan>Serial port closed.</color>");
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
                 Debug.LogError($"Error closing serial port: {e.Message}");
             }
         }
 
-        // スレッドが安全に終了したことを確認する（Joinのタイムアウトも設定するとより安全）
+        // スレッドが安全に終了したことを確認する
         if (readThread != null && readThread.IsAlive)
         {
-            // 念のため、最大100ミリ秒だけ待つ
             readThread.Join(100);
         }
     }

@@ -25,6 +25,8 @@ public class StationEvent
     public int npcsToSpawn;
     [Tooltip("駅の名前(UI表示用)")]
     public string stationName;
+    [Tooltip("この駅で表示する背景のスプライト")]
+    public Sprite stationBackgroundSprite;
 }
 
 [RequireComponent(typeof(AudioSource))] // このスクリプトにはAudioSourceが必須
@@ -89,6 +91,10 @@ public class StageManager : MonoBehaviour
     [Header("効果音設定")]
     [Tooltip("NPCを倒した時の効果音")]
     public SoundEffect npcDefeatSound;
+
+    [Header("背景")]
+    [Tooltip("シーンのParallaxControllerへの参照")]
+    public ParallaxController parallaxController;
 
     private AudioSource audioSource;
     private float currentCongestionRate;
@@ -241,47 +247,62 @@ public class StageManager : MonoBehaviour
 
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
-        // ① まもなく到着アナウンスと減速開始
+        // ① 駅接近開始：ParallaxControllerに駅背景へのクロスフェードを開始させる
+        if (parallaxController != null)
+        {
+            parallaxController.StartApproachingStation(station.stationBackgroundSprite);
+        }
+
+        // ② UI表示を「減速中」に変更
         if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
         if (statusText != null) statusText.text = ">>>減速中>>>";
         CurrentInertia = new Vector2(-inertiaForce, 0);
 
-        // ② 効果音と点滅停止までの待機
+        // ③ 駅の演出時間（背景フェードや減速など）
         yield return new WaitForSeconds(delayBeforeSpawn);
+
+        // ④ 駅に到着したので、進捗UIの点滅を停止
         StopBlinking();
+
+        // 効果音を再生
         if (finalArrivalSound != null && finalArrivalSound.clip != null)
         {
             audioSource.PlayOneShot(finalArrivalSound.clip, finalArrivalSound.volume);
         }
 
-        // ③ NPCをスポーンさせ、混雑率を更新
+        // ⑤ NPCをスポーンさせ、混雑率を更新
         int spawnedCount = NPCManager.instance.SpawnNPCs(this, station.npcsToSpawn);
         currentCongestionRate += spawnedCount * rateDecreasePerNpc;
         UpdateCongestionUI();
 
-        // ゲームオーバー判定
         if (currentCongestionRate >= maxCongestionRate)
         {
             TriggerGameOver();
             yield break;
         }
 
-        // ④ 停車状態へ移行
+        // ⑥ 停車状態へ移行
         if (statusText != null) statusText.text = "停車中";
-        CurrentInertia = Vector2.zero; // 停車中は慣性をゼロに
+        CurrentInertia = Vector2.zero;
 
-        // ⑤ 停車時間ぶん待機
+        // ⑦ 停車時間ぶん待機
         yield return new WaitForSeconds(stationStopTime);
 
-        // ⑥ 駅名表示を消し、加速状態へ移行
+        // ⑧ 駅出発：ParallaxControllerに通常背景へのクロスフェードを開始させる
+        if (parallaxController != null)
+        {
+            parallaxController.DepartFromStation();
+        }
+
+        // ⑨ UI表示を「加速中」に変更
         if (stationNameText != null) stationNameText.text = "";
         if (statusText != null) statusText.text = "<<<加速中<<<";
         CurrentInertia = new Vector2(inertiaForce, 0);
 
-        // ⑦ 加速時間ぶん待機
+        // ⑩ 加速時間ぶん待機
         yield return new WaitForSeconds(accelerationTime);
 
-        // ⑧ 走行状態へ移行
+        // ⑪ 走行状態へ移行
         if (statusText != null) statusText.text = "走行中";
         CurrentInertia = Vector2.zero;
     }

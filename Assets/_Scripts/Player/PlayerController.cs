@@ -590,11 +590,11 @@ private void ChangeState(PlayerState newState)
         // コンソールに判定結果を詳しく出力する
         if (hit.collider != null)
         {
-            Debug.Log($"<color=green>IsGrounded SUCCESS:</color> レイがオブジェクト「{hit.collider.name}」（レイヤー: {LayerMask.LayerToName(hit.collider.gameObject.layer)}）にヒットしました。IsGroundedは true を返します。");
+            //Debug.Log($"<color=green>IsGrounded SUCCESS:</color> レイがオブジェクト「{hit.collider.name}」（レイヤー: {LayerMask.LayerToName(hit.collider.gameObject.layer)}）にヒットしました。IsGroundedは true を返します。");
         }
         else
         {
-            Debug.Log($"<color=red>IsGrounded FAILURE:</color> レイは地面を検知しませんでした。IsGroundedは false を返します。");
+            //Debug.Log($"<color=red>IsGrounded FAILURE:</color> レイは地面を検知しませんでした。IsGroundedは false を返します。");
         }
 
         return hit.collider != null;
