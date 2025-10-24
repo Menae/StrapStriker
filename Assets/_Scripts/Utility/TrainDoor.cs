@@ -1,6 +1,4 @@
-﻿// TrainDoor.cs
-using System.Collections;
-using UnityEditor.EditorTools;
+﻿using System.Collections;
 using UnityEngine;
 
 public class TrainDoor : MonoBehaviour
