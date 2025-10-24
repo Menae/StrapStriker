@@ -6459,6 +6459,7 @@ MonoBehaviour:
   inertiaSwingBonus: 1.5
   gripReleaseGracePeriod: 0.1
   debugMode: 1
+  inputDelayAfterStart: 0.5
 --- !u!61 &1082202013
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -6918,6 +6919,9 @@ MonoBehaviour:
   finalRunDuration: 20
   finalArrivalSound:
     clip: {fileID: 8300000, guid: 9c035c14f5e291f46bdc7ff44d169013, type: 3}
+    volume: 0.5
+  npcDefeatSound:
+    clip: {fileID: 8300000, guid: 3bbee5d38c6cc654999d084ca1734018, type: 3}
     volume: 0.5
 --- !u!4 &1142329254
 Transform:
