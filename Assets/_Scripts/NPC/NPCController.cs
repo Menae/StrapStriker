@@ -141,6 +141,12 @@ public class NPCController : MonoBehaviour
         // 衝撃が「倒れる」しきい値を超えた場合
         if (impactMagnitude > fallenThreshold)
         {
+            // 死亡が確定した瞬間に、StageManagerにSEの再生を依頼する
+            if (stageManager != null)
+            {
+                stageManager.PlayNpcDefeatSound();
+            }
+
             currentState = NPCState.KnockedDown;
             animator.SetTrigger("Fallen");
             StartCoroutine(FadeOutAndDespawnRoutine());

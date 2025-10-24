@@ -86,6 +86,10 @@ public class StageManager : MonoBehaviour
     [Tooltip("終点到着時の効果音")]
     public SoundEffect finalArrivalSound;
 
+    [Header("効果音設定")]
+    [Tooltip("NPCを倒した時の効果音")]
+    public SoundEffect npcDefeatSound;
+
     private AudioSource audioSource;
     private float currentCongestionRate;
     private int defeatedNpcCount;
@@ -147,8 +151,11 @@ public class StageManager : MonoBehaviour
 
     public void OnNpcDefeated()
     {
+        // 混雑率を更新
         currentCongestionRate -= rateDecreasePerNpc;
         UpdateCongestionUI();
+
+        // 倒したNPCの数を加算してUIを更新
         defeatedNpcCount++;
         UpdateDefeatedNpcCountUI();
     }
@@ -323,6 +330,14 @@ public class StageManager : MonoBehaviour
         if (yellowBall != null)
         {
             yellowBall.enabled = true;
+        }
+    }
+
+    public void PlayNpcDefeatSound()
+    {
+        if (npcDefeatSound != null && npcDefeatSound.clip != null)
+        {
+            audioSource.PlayOneShot(npcDefeatSound.clip, npcDefeatSound.volume);
         }
     }
 

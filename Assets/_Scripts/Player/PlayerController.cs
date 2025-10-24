@@ -86,6 +86,10 @@ public class PlayerController : MonoBehaviour
 
     private const float MinLaunchPower = 1f; // 発射に最低限必要なパワー
 
+    private float gameStartTime = -1f; // ゲームがPlaying状態になった時刻
+    [Tooltip("ゲーム開始後、入力受付を開始するまでの無効時間（秒）")]
+    public float inputDelayAfterStart = 0.5f;
+
     // --- Component References ---
     private Rigidbody2D rb;
     private Animator playerAnim;
@@ -142,10 +146,28 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        // ゲームがプレイ中でない場合、タイマーをリセットして処理を抜ける
         if (stageManager != null && stageManager.CurrentState != StageManager.GameState.Playing)
         {
+            gameStartTime = -1f;
             return;
         }
+
+        // ゲームがプレイ中になった瞬間を検知し、開始時刻を記録する
+        if (gameStartTime < 0f)
+        {
+            gameStartTime = Time.time;
+        }
+
+        // ゲーム開始からの経過時間が、設定した無効時間より短い場合は入力を無視する
+        if (Time.time < gameStartTime + inputDelayAfterStart)
+        {
+            // ただし、入力の記録だけは更新しておき、無効時間終了直後の誤作動を防ぐ
+            wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
+            return;
+        }
+
+        // --- ここからが修正された入力処理 ---
 
         // 1. センサーやキーボードからの「生」の入力状態を読み取る
         bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
@@ -166,9 +188,12 @@ public class PlayerController : MonoBehaviour
         //    信号がONか、または信号がOFFでも猶予期間内なら「掴んでいる」とみなす
         bool isGripInputActive = isRawGripSignalActive || (timeSinceGripLow < gripReleaseGracePeriod);
 
-        // 4. 前フレームとの状態比較から「掴んだ瞬間」「離した瞬間」を判定する（この部分は変更なし）
+        // 4. 前フレームとの状態比較から「掴んだ瞬間」「離した瞬間」を判定する
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
+
+        // --- 入力処理の修正はここまで ---
+
 
         switch (currentState)
         {
