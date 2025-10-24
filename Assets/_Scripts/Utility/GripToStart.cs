@@ -22,18 +22,31 @@ public class GripToStart : MonoBehaviour
 
     void Update()
     {
-        // まだシーン遷移中でなく、かつArduinoが接続されている場合
-        if (!isLoading && ArduinoInputManager.instance != null)
+        // 既にシーン遷移中なら何もしない
+        if (isLoading)
         {
-            // 握力センサーの値がしきい値を超えたかチェック
+            return;
+        }
+
+        // Arduinoマネージャーが存在し、かつArduinoとの接続に成功している場合
+        if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
+        {
+            // 握力センサーの値をチェックする
             if (ArduinoInputManager.GripValue > gripThreshold)
             {
-                // しきい値を超えたら、フラグを立てて多重実行を防止
                 isLoading = true;
-
-                Debug.Log($"<color=cyan>Grip detected! Value: {ArduinoInputManager.GripValue}. Loading next scene...</color>");
-
-                // SceneLoaderButtonにシーン遷移を命令する
+                Debug.Log($"<color=cyan>Grip detected! Loading next scene...</color>");
+                sceneLoaderButton.LoadTargetScene();
+            }
+        }
+        // それ以外の場合（マネージャーが存在しない、または接続に失敗している場合）
+        else
+        {
+            // デバッグ用のスペースキー入力をチェックする
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                isLoading = true;
+                Debug.Log("<color=yellow>Debug: Loading next scene on Space key press.</color>");
                 sceneLoaderButton.LoadTargetScene();
             }
         }

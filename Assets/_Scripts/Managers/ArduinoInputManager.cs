@@ -14,6 +14,8 @@ public class ArduinoInputManager : MonoBehaviour
     [Tooltip("Arduinoと合わせるボーレート (通信速度)")]
     public int baudRate = 9600;
 
+    public bool IsConnected { get; private set; } = false;
+
     // --- 他のスクリプトから参照する握力センサーの値 ---
     // volatileキーワードは、複数のスレッドからアクセスされる変数のお守りのようなもの
     public static volatile int GripValue;
@@ -71,6 +73,7 @@ public class ArduinoInputManager : MonoBehaviour
                     isThreadRunning = true;
                     readThread = new Thread(ReadSerialData);
                     readThread.Start();
+                    IsConnected = true;
                     return; // 接続に成功したので、ここで処理を終了
                 }
                 else
@@ -113,6 +116,7 @@ public class ArduinoInputManager : MonoBehaviour
                 isThreadRunning = true;
                 readThread = new Thread(ReadSerialData);
                 readThread.Start();
+                IsConnected = true;
 
                 Debug.Log($"<color=cyan>SUCCESS:</color> Connected to fallback port {fallbackPortName}!");
             }
