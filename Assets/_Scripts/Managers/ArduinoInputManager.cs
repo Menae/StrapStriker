@@ -163,22 +163,29 @@ public class ArduinoInputManager : MonoBehaviour
     // ゲーム終了時に呼ばれる処理
     void OnDestroy()
     {
-        // スレッドを安全に停止させる
-        if (isThreadRunning)
+        // スレッドにループを抜けさせるという合図を送る
+        isThreadRunning = false;
+
+        // スレッドが終了するのを待つ前にシリアルポートを強制的に閉じる。
+        // これにより、ReadLine()で待機中のスレッドがエラーで叩き起こされ、ループを抜けられるようになる。
+        if (serialPort != null && serialPort.IsOpen)
         {
-            isThreadRunning = false;
-            // スレッドが完全に終了するのを待つ
-            if (readThread != null && readThread.IsAlive)
+            try
             {
-                readThread.Join();
+                serialPort.Close();
+                Debug.Log("<color=cyan>Serial port closed.</color>");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error closing serial port: {e.Message}");
             }
         }
 
-        // シリアルポートを安全に閉じる
-        if (serialPort != null && serialPort.IsOpen)
+        // スレッドが安全に終了したことを確認する（Joinのタイムアウトも設定するとより安全）
+        if (readThread != null && readThread.IsAlive)
         {
-            serialPort.Close();
-            Debug.Log("<color=cyan>Serial port closed.</color>");
+            // 念のため、最大100ミリ秒だけ待つ
+            readThread.Join(100);
         }
     }
 }
