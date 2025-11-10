@@ -2,9 +2,6 @@
 
 public class QuitButtonHandler : MonoBehaviour
 {
-    /// <summary>
-    /// UIボタンのOnClick()イベントから呼び出すためのメソッドです。
-    /// </summary>
     public void QuitGame()
     {
         Debug.Log("ゲームを終了しようとしています...");

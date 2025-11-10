@@ -1,11 +1,11 @@
 ﻿using UnityEngine;
-using System.IO.Ports; // シリアル通信に必要
-using System.Threading; // スレッド処理に必要
-using System; // 例外処理に必要
+using System.IO.Ports;
+using System.Threading;
+using System;
+using System.IO;
 
 public class ArduinoInputManager : MonoBehaviour
 {
-    // --- シングルトンインスタンス ---
     public static ArduinoInputManager instance;
 
     [Header("フォールバック設定")]
@@ -17,7 +17,6 @@ public class ArduinoInputManager : MonoBehaviour
     public bool IsConnected { get; private set; } = false;
 
     // --- 他のスクリプトから参照する握力センサーの値 ---
-    // volatileキーワードは、複数のスレッドからアクセスされる変数のお守りのようなもの
     public static volatile int GripValue;
 
     // --- 内部変数 ---
@@ -32,6 +31,9 @@ public class ArduinoInputManager : MonoBehaviour
         {
             instance = this;
             DontDestroyOnLoad(gameObject); // シーンをまたいでも破棄されないようにする
+
+            // 設定ファイルを読み込んで、フォールバック用のポート番号を上書きする
+            LoadConfig();
         }
         else
         {
@@ -47,87 +49,44 @@ public class ArduinoInputManager : MonoBehaviour
 
     private void ConnectToArduino()
     {
+        // 利用可能なポートをチェック（デバッグログ用）
         string[] availablePorts = SerialPort.GetPortNames();
         if (availablePorts.Length == 0)
         {
-            Debug.LogWarning("No COM ports found.");
+            Debug.LogWarning("PCにCOMポートが一つも見つかりません。");
+            return;
+        }
+        Debug.Log("利用可能なポート: " + string.Join(", ", availablePorts));
+
+        // Inspectorで指定されたポート名が空かどうかチェック
+        if (string.IsNullOrEmpty(fallbackPortName))
+        {
+            Debug.LogError("<color=red>Inspectorまたはconfig.txtで 'Fallback Port Name' が設定されていません！</color>");
             return;
         }
 
-        // ハンドシェイクによる自動検出を試みる
-        Debug.Log($"Phase 1: Found {availablePorts.Length} ports. Searching for Arduino via handshake...");
-        foreach (string port in availablePorts)
+        // --- メインの接続処理 ---
+        Debug.Log($"<color=cyan>指定されたポート '{fallbackPortName}' への直接接続を試みます...</color>");
+        try
         {
-            SerialPort tempPort = new SerialPort(port, baudRate);
-            tempPort.ReadTimeout = 200;
-            try
-            {
-                tempPort.Open();
-                tempPort.Write("p");
-                string response = tempPort.ReadLine().Trim();
+            // 指定されたポートに、ハンドシェイクなしで直接接続する
+            serialPort = new SerialPort(fallbackPortName, baudRate);
+            serialPort.ReadTimeout = 1000;
+            serialPort.Open();
 
-                if (response == "STRAP_STRIKER_GRIP")
-                {
-                    Debug.Log($"<color=cyan>SUCCESS:</color> Arduino found on {port} via handshake!");
-                    serialPort = tempPort;
-                    isThreadRunning = true;
-                    readThread = new Thread(ReadSerialData);
-                    readThread.Start();
-                    IsConnected = true;
-                    return; // 接続に成功したので、ここで処理を終了
-                }
-                else
-                {
-                    tempPort.Close();
-                }
-            }
-            catch (Exception)
-            {
-                if (tempPort.IsOpen) tempPort.Close();
-            }
+            // 接続成功
+            isThreadRunning = true;
+            readThread = new Thread(ReadSerialData);
+            readThread.Start();
+            IsConnected = true;
+
+            Debug.Log($"<color=green>SUCCESS:</color> '{fallbackPortName}' への接続に成功しました！");
         }
-
-        // 自動検出が失敗した場合、フォールバック接続を試みる
-        Debug.LogWarning($"<color=orange>Phase 1 FAILED:</color> Handshake failed on all ports. Trying fallback to '{fallbackPortName}'.");
-
-        // フォールバック用のポート名が指定されており、かつ利用可能なポートリストに存在するかチェック
-        bool portExists = false;
-        if (!string.IsNullOrEmpty(fallbackPortName))
+        catch (Exception e)
         {
-            foreach (string port in availablePorts)
-            {
-                if (port == fallbackPortName)
-                {
-                    portExists = true;
-                    break;
-                }
-            }
-        }
-
-        if (portExists)
-        {
-            try
-            {
-                // ハンドシェイクなしで、指定されたポートに直接接続を試みる
-                serialPort = new SerialPort(fallbackPortName, baudRate);
-                serialPort.ReadTimeout = 1000;
-                serialPort.Open();
-
-                isThreadRunning = true;
-                readThread = new Thread(ReadSerialData);
-                readThread.Start();
-                IsConnected = true;
-
-                Debug.Log($"<color=cyan>SUCCESS:</color> Connected to fallback port {fallbackPortName}!");
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"<color=red>Phase 2 FAILED:</color> Could not connect to fallback port '{fallbackPortName}'. Error: {e.Message}");
-            }
-        }
-        else
-        {
-            Debug.LogError($"<color=red>Phase 2 FAILED:</color> Fallback port '{fallbackPortName}' not found or not specified.");
+            // 接続失敗
+            Debug.LogError($"<color=red>FAILED:</color> '{fallbackPortName}' への接続に失敗しました。Error: {e.Message}");
+            IsConnected = false;
         }
     }
 
@@ -155,6 +114,47 @@ public class ArduinoInputManager : MonoBehaviour
             }
         }
     }
+
+    // config.txtからポート番号を読み込むメソッド
+    private void LoadConfig()
+    {
+        // ビルドした.exeファイルと同じ階層にある "config.txt" のパスを取得
+        string configPath = Path.Combine(Application.dataPath, "..", "config.txt");
+
+        Debug.Log($"Searching for config file at: {configPath}");
+
+        // もし設定ファイルが存在すれば、その中身を読み取る
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                // ファイルの各行を読み込む
+                string[] lines = File.ReadAllLines(configPath);
+                foreach (string line in lines)
+                {
+                    // "port_name=COM4" のような行を探す
+                    if (line.StartsWith("port_name="))
+                    {
+                        // "="の右側にある値（ポート名）を取得する
+                        string portFromConfig = line.Split('=')[1].Trim();
+                        // Inspectorで設定された値を、ファイルから読み取った値で上書きする
+                        fallbackPortName = portFromConfig;
+                        Debug.Log($"<color=yellow>Config Loaded:</color> Fallback port set to '{fallbackPortName}' from config.txt");
+                        return; // 読み込めたので処理を終了
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error reading config file: {e.Message}");
+            }
+        }
+        else
+        {
+            Debug.LogWarning("config.txt not found. Using default Inspector value for fallback port.");
+        }
+    }
+
 
     // ゲーム終了時に呼ばれる処理
     void OnDestroy()

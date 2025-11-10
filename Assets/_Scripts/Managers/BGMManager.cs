@@ -2,14 +2,11 @@
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 
-// このコンポーネントにはAudioSourceが必須であることを示す
 [RequireComponent(typeof(AudioSource))]
 public class BGMManager : MonoBehaviour
 {
-    // --- このクラスの唯一のインスタンスを保持する ---
     public static BGMManager instance;
 
-    // --- Inspectorで設定するためのデータ構造 ---
     [System.Serializable]
     public class SceneBGM
     {
@@ -27,11 +24,10 @@ public class BGMManager : MonoBehaviour
     public List<SceneBGM> sceneBgmList;
 
     private AudioSource audioSource;
-    private string currentSceneName; // 現在のシーン名を記録
+    private string currentSceneName;
 
     void Awake()
     {
-        // --- シングルトンパターンの実装 ---
         if (instance == null)
         {
             // 誰もインスタンスを持っていなければ、自分がインスタンスになる

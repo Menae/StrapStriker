@@ -1,9 +1,8 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 public class NPCPool : MonoBehaviour
 {
-    // シングルトンインスタンス：どこからでもアクセスできるようにする
     public static NPCPool instance;
 
     [Header("プール設定")]
@@ -42,7 +41,7 @@ public class NPCPool : MonoBehaviour
     // プールからNPCを1体取り出すメソッド
     public GameObject GetNPC()
     {
-        // もしプールが空なら、念のため新しく生成する（堅牢性のための保険）
+        // もしプールが空なら、念のため新しく生成する
         if (npcPool.Count == 0)
         {
             GameObject newNpc = Instantiate(npcPrefab);

@@ -3,7 +3,6 @@ using UnityEngine;
 
 public class NPCManager : MonoBehaviour
 {
-    // シングルトンインスタンス
     public static NPCManager instance;
 
     [Header("設定")]

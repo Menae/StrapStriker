@@ -21,27 +21,21 @@ public class TrainDoor : MonoBehaviour
         if (leftDoor != null) leftDoorInitialPos = leftDoor.transform.position;
         if (rightDoor != null) rightDoorInitialPos = rightDoor.transform.position;
     }
-
-    // --- ここからが追加/変更箇所 ---
     void OnEnable()
     {
-        // 自分が有効になったら、司令塔に自分を登録する
         DoorManager.Register(this);
     }
 
     void OnDisable()
     {
-        // 自分が無効になったら、司令塔から自分を登録解除する
         DoorManager.Unregister(this);
     }
 
-    // メソッド名を変更
     public void OpenAndClose()
     {
         if (isAnimating) return;
         StartCoroutine(OpenAndCloseRoutine());
     }
-    // --- 変更ここまで ---
 
     private IEnumerator OpenAndCloseRoutine()
     {

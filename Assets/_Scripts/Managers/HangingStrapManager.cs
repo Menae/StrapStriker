@@ -1,9 +1,8 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 public class HangingStrapManager : MonoBehaviour
 {
-    // シーン内の全てのつり革を格納する静的リスト
     private static List<HangingStrap> allStraps = new List<HangingStrap>();
 
     // つり革が自分をリストに登録するためのメソッド

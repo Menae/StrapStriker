@@ -5,7 +5,6 @@ using System.Collections;
 
 public class SceneFader : MonoBehaviour
 {
-    // どこからでもアクセスできるシングルトンインスタンス
     public static SceneFader instance;
 
     [Tooltip("フェードに使うUIのImageコンポーネント")]
@@ -62,7 +61,6 @@ public class SceneFader : MonoBehaviour
         StartCoroutine(FadeOutCoroutine(sceneName, duration));
     }
 
-    // フェードアウト処理
     private IEnumerator FadeOutCoroutine(string sceneName, float duration)
     {
         fadeImage.gameObject.SetActive(true);

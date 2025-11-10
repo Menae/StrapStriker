@@ -72,13 +72,13 @@ public class TrainViewShaker : MonoBehaviour
             float waitTime = Random.Range(joltIntervalMin, joltIntervalMax);
             yield return new WaitForSeconds(waitTime);
 
-            // 1回目の衝撃（ガタン！）を発生させる
+            // 1回目の衝撃を発生させる
             StartCoroutine(ExecuteJoltCoroutine());
 
-            // 「ガタン」と「ゴトン」の間の短い待機
+            // 短い待機
             yield return new WaitForSeconds(doubleJoltDelay);
 
-            // 2回目の衝撃（ゴトン！）を発生させる
+            // 2回目の衝撃を発生させる
             StartCoroutine(ExecuteJoltCoroutine());
         }
     }

@@ -49,7 +49,7 @@ public class ParallaxController : MonoBehaviour
             for (int i = 0; i < 3; i++)
             {
                 var instance = Instantiate(layer.layerPrefab, transform);
-                layer.instances[i] = instance.transform; // ← これでエラーが起きなくなる
+                layer.instances[i] = instance.transform;
                 float initialX = (i - 1) * layer.spriteWidth;
                 instance.transform.position = new Vector2(initialX, transform.position.y);
             }
@@ -65,7 +65,7 @@ public class ParallaxController : MonoBehaviour
 
     void LateUpdate()
     {
-        // もし状態が「通常ループ中」なら、背景をスクロールさせる
+        // 「通常ループ中」なら、背景をスクロールさせる
         if (currentState == ParallaxState.Looping)
         {
             UpdateLoopingLayers();

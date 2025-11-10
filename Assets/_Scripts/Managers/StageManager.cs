@@ -29,7 +29,7 @@ public class StationEvent
     public Sprite stationBackgroundSprite;
 }
 
-[RequireComponent(typeof(AudioSource))] // このスクリプトにはAudioSourceが必須
+[RequireComponent(typeof(AudioSource))]
 public class StageManager : MonoBehaviour
 {
     // ゲーム全体の進行状態を管理
@@ -251,21 +251,21 @@ public class StageManager : MonoBehaviour
 
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
-        // ① 駅接近開始：ParallaxControllerに駅背景へのクロスフェードを開始させる
+        // 駅接近開始：ParallaxControllerに駅背景へのクロスフェードを開始させる
         if (parallaxController != null)
         {
             parallaxController.StartApproachingStation(station.stationBackgroundSprite);
         }
 
-        // ② UI表示を「減速中」に変更
+        // UI表示を「減速中」に変更
         if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
         if (statusText != null) statusText.text = ">>>減速中>>>";
         CurrentInertia = new Vector2(-inertiaForce, 0);
 
-        // ③ 駅の演出時間（背景フェードや減速など）
+        // 駅の演出時間（背景フェードや減速など）
         yield return new WaitForSeconds(delayBeforeSpawn);
 
-        // ④ 駅に到着したので、進捗UIの点滅を停止
+        // 駅に到着したので、進捗UIの点滅を停止
         StopBlinking();
 
         // 効果音を再生
@@ -279,7 +279,7 @@ public class StageManager : MonoBehaviour
             DoorManager.OpenAllDoors();
         }
 
-        // ⑤ NPCをスポーンさせ、混雑率を更新
+        // NPCをスポーンさせ、混雑率を更新
         int spawnedCount = NPCManager.instance.SpawnNPCs(this, station.npcsToSpawn);
         currentCongestionRate += spawnedCount * rateDecreasePerNpc;
         UpdateCongestionUI();
@@ -290,28 +290,28 @@ public class StageManager : MonoBehaviour
             yield break;
         }
 
-        // ⑥ 停車状態へ移行
+        // 停車状態へ移行
         if (statusText != null) statusText.text = "停車中";
         CurrentInertia = Vector2.zero;
 
-        // ⑦ 停車時間ぶん待機
+        // 停車時間ぶん待機
         yield return new WaitForSeconds(stationStopTime);
 
-        // ⑧ 駅出発：ParallaxControllerに通常背景へのクロスフェードを開始させる
+        // 駅出発：ParallaxControllerに通常背景へのクロスフェードを開始させる
         if (parallaxController != null)
         {
             parallaxController.DepartFromStation();
         }
 
-        // ⑨ UI表示を「加速中」に変更
+        // UI表示を「加速中」に変更
         if (stationNameText != null) stationNameText.text = "";
         if (statusText != null) statusText.text = "<<<加速中<<<";
         CurrentInertia = new Vector2(inertiaForce, 0);
 
-        // ⑩ 加速時間ぶん待機
+        // 加速時間ぶん待機
         yield return new WaitForSeconds(accelerationTime);
 
-        // ⑪ 走行状態へ移行
+        // 走行状態へ移行
         if (statusText != null) statusText.text = "走行中";
         CurrentInertia = Vector2.zero;
     }

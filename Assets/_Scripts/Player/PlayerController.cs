@@ -90,7 +90,7 @@ public class PlayerController : MonoBehaviour
     [Tooltip("ゲーム開始後、入力受付を開始するまでの無効時間（秒）")]
     public float inputDelayAfterStart = 0.5f;
 
-    // --- Component References ---
+    // 内部変数
     private Rigidbody2D rb;
     private Animator playerAnim;
     private StageManager stageManager;
@@ -98,18 +98,17 @@ public class PlayerController : MonoBehaviour
     private List<Joycon> joycons;
     private Joycon joycon;
 
-    // --- Player State ---
+    // Player State
     private PlayerState currentState = PlayerState.Idle;
     private float swayPower = 0f;
     private HangingStrap currentStrap = null;
     private float lastFacingDirection = 1f; // 最後に見ていた向き(1=右, -1=左)
 
-    // --- Input Handling ---
+    // Input Handling
     private bool wasGripInputActiveLastFrame = false;
     private float lastYaw = 0f; // Joy-Conの前回のヨー角
     private float timeSinceGripLow = 0f; // 握力が弱い状態が続いている時間
 
-    // --- Coroutine Management ---
     private Coroutine grabToSwayCoroutine;
 
 
@@ -119,7 +118,6 @@ public class PlayerController : MonoBehaviour
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         playerAnim = GetComponentInChildren<Animator>();
 
-        // --- このデバッグログを追加 ---
         if (playerAnim == null)
         {
             Debug.LogError("Playerの子オブジェクトにAnimatorが見つかりません！ playerAnimがnullです。");
@@ -167,12 +165,10 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        // --- ここからが修正された入力処理 ---
-
-        // 1. センサーやキーボードからの「生」の入力状態を読み取る
+        // センサーやキーボードからの入力状態を読み取る
         bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
 
-        // 2. 生の入力状態に基づいて、猶予タイマーを更新する
+        // 入力状態に基づいて、猶予タイマーを更新する
         if (isRawGripSignalActive)
         {
             // 信号がONなら、タイマーをリセット
@@ -184,16 +180,13 @@ public class PlayerController : MonoBehaviour
             timeSinceGripLow += Time.deltaTime;
         }
 
-        // 3. 安定化された最終的な「掴んでいる」状態を決定する
-        //    信号がONか、または信号がOFFでも猶予期間内なら「掴んでいる」とみなす
+        // 最終的な「掴んでいる」状態を決定する
+        // 信号がONか、または信号がOFFでも猶予期間内なら「掴んでいる」とみなす
         bool isGripInputActive = isRawGripSignalActive || (timeSinceGripLow < gripReleaseGracePeriod);
 
-        // 4. 前フレームとの状態比較から「掴んだ瞬間」「離した瞬間」を判定する
+        // 前フレームとの状態比較から「掴んだ瞬間」「離した瞬間」を判定する
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
-
-        // --- 入力処理の修正はここまで ---
-
 
         switch (currentState)
         {
@@ -281,13 +274,13 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
-        // --- アニメーションの状態を同期 ---
+        // アニメーションの状態を同期
         if (playerAnim != null)
         {
             playerAnim.SetInteger("State", (int)currentState);
         }
 
-        // --- キャラクターの向きを同期 ---
+        // キャラクターの向きを同期
         HandleDirection();
     }
 
@@ -295,7 +288,6 @@ private void ChangeState(PlayerState newState)
 {
     if (currentState == newState) return;
 
-    // [提案] 状態がいつ、どのように変わったかログに出力する
     if (debugMode)
     {
         Debug.Log($"<color=cyan>State Change:</color> {currentState} -> <color=yellow>{newState}</color>");
@@ -312,7 +304,7 @@ private void ChangeState(PlayerState newState)
             return;
         }
 
-        // 空中(Launched)状態では、向きの更新を行わない
+        // Launched状態では、向きの更新を行わない
         if (currentState != PlayerState.Launched)
         {
             // キャラクターの水平方向の速度を取得
@@ -357,11 +349,12 @@ private void ChangeState(PlayerState newState)
             // 基本となるトルクを計算
             float totalTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
 
-            // スイング方向と慣性の方向が一致しているかチェック
-            if (Mathf.Sign(horizontalInput) == Mathf.Sign(StageManager.CurrentInertia.x))
+            // スイング方向と慣性の方向が逆であるかチェック
+            // 加速中(+)は左(-)に振ると、減速中(-)は右(+)に振るとボーナス
+            if (Mathf.Sign(horizontalInput) != Mathf.Sign(StageManager.CurrentInertia.x) && StageManager.CurrentInertia.x != 0)
             {
-                // 方向が一致していれば、慣性ボーナスを加える
-                totalTorque += StageManager.CurrentInertia.x * inertiaSwingBonus;
+                // 方向が逆（慣性に沿ったスイング）なら、慣性ボーナスを加える
+                totalTorque += StageManager.CurrentInertia.x * inertiaSwingBonus * -Mathf.Sign(horizontalInput); // 慣性の力でスイングを後押しする
             }
 
             rb.AddTorque(totalTorque);
@@ -371,14 +364,14 @@ private void ChangeState(PlayerState newState)
         {
             if (joycon == null) return;
 
-            // --- 1. Joy-Conから角度と角速度を取得 ---
+            // Joy-Conから角度と角速度を取得
             Quaternion orientation = joycon.GetVector();
             Vector3 eulerAngles = orientation.eulerAngles;
             float currentYaw = eulerAngles.y;
             float yawVelocity = Mathf.DeltaAngle(lastYaw, currentYaw) / Time.fixedDeltaTime;
             lastYaw = currentYaw;
 
-            // --- 2. 角度に基づいて力の方向を計算し、Stateを更新 ---
+            // 角度に基づいて力の方向を計算し、Stateを更新
             float normalizedForce = 0f;
             if (currentYaw > rightSwingAngleMin && currentYaw < rightSwingAngleMax)
             {
@@ -391,18 +384,18 @@ private void ChangeState(PlayerState newState)
                 ChangeState(PlayerState.Swaying);
             }
 
-            // --- 3. トルクをかけ、タイミングが良い時だけパワーを溜める ---
+            // トルクをかけ、タイミングが良い時だけパワーを溜める
             // スイング入力がある場合(デッドゾーン外の場合)
             if (normalizedForce != 0)
             {
                 // 基本となるトルクを計算
                 float totalTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
 
-                // スイング方向と慣性の方向が一致しているかチェック
-                if (Mathf.Sign(normalizedForce) == Mathf.Sign(StageManager.CurrentInertia.x))
+                // スイング方向と慣性の方向が「逆」であるかチェック
+                if (Mathf.Sign(normalizedForce) != Mathf.Sign(StageManager.CurrentInertia.x) && StageManager.CurrentInertia.x != 0)
                 {
-                    // 方向が一致していれば、慣性ボーナスを加える
-                    totalTorque += StageManager.CurrentInertia.x * inertiaSwingBonus;
+                    // 方向が逆（＝慣性に沿ったスイング）なら、慣性ボーナスを加える
+                    totalTorque += StageManager.CurrentInertia.x * inertiaSwingBonus * -Mathf.Sign(normalizedForce);
                 }
 
                 rb.AddTorque(totalTorque);
@@ -424,7 +417,7 @@ private void ChangeState(PlayerState newState)
         }
     }
 
-    // アイドル時の移動はできなくなったので、このメソッドは空にする
+    // アイドル時の移動不可
     private void ExecuteIdleMovement()
     {
         // 何もしない
@@ -587,7 +580,6 @@ private void ChangeState(PlayerState newState)
         Color rayColor = hit ? Color.green : Color.red;
         Debug.DrawRay(feetPosition.position, Vector2.down * groundCheckDistance, rayColor);
 
-        // コンソールに判定結果を詳しく出力する
         if (hit.collider != null)
         {
             //Debug.Log($"<color=green>IsGrounded SUCCESS:</color> レイがオブジェクト「{hit.collider.name}」（レイヤー: {LayerMask.LayerToName(hit.collider.gameObject.layer)}）にヒットしました。IsGroundedは true を返します。");
@@ -598,10 +590,5 @@ private void ChangeState(PlayerState newState)
         }
 
         return hit.collider != null;
-    }
-
-    void OnCollisionEnter2D(Collision2D collision)
-    {
-        // 地面との衝突判定ロジックはFixedUpdateに移動したため、ここは空にする
     }
 }

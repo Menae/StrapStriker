@@ -1,6 +1,5 @@
 ﻿using UnityEngine;
 
-// SceneLoaderButtonと同じゲームオブジェクトにアタッチすることを想定
 [RequireComponent(typeof(SceneLoaderButton))]
 public class GripToStart : MonoBehaviour
 {

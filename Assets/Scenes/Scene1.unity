@@ -6018,7 +6018,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   handPoint: {fileID: 1770777878}
   gripThreshold: 1
-  swayForceByAngle: 15
+  swayForceByAngle: 5
   swayForceByVelocity: 0.1
   swayIncreaseRate: 10
   swayDecayRate: 1
@@ -6045,8 +6045,8 @@ MonoBehaviour:
   inertiaBonusMultiplier: 2
   inertiaSwingBonus: 1.5
   gripReleaseGracePeriod: 0.1
-  debugMode: 1
-  inputDelayAfterStart: 0.5
+  debugMode: 0
+  inputDelayAfterStart: 0.1
 --- !u!61 &1082202013
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -6430,30 +6430,30 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7351b9388d44f1742b9d3e33ec4cf503, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  inertiaForce: -10
+  inertiaForce: 0
   initialCongestionRate: 100
   maxCongestionRate: 300
-  rateDecreasePerNpc: 5
+  rateDecreasePerNpc: 1
   stationEvents:
   - timeToArrival: 10
-    npcsToSpawn: 10
-    stationName: TEMP
+    npcsToSpawn: 70
+    stationName: "\u3044\u308D\u306F\u5742"
+    stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
+  - timeToArrival: 10
+    npcsToSpawn: 60
+    stationName: "\u3068\u304D\u306E\u753A"
+    stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
+  - timeToArrival: 10
+    npcsToSpawn: 70
+    stationName: "\u307B\u306E\u5CE0"
+    stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
+  - timeToArrival: 10
+    npcsToSpawn: 80
+    stationName: "\u3061\u3050\u3055\u91CE"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
     npcsToSpawn: 100
-    stationName: TEMP
-    stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
-  - timeToArrival: 10
-    npcsToSpawn: 100
-    stationName: TEMP
-    stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
-  - timeToArrival: 10
-    npcsToSpawn: 100
-    stationName: TEMP
-    stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
-  - timeToArrival: 10
-    npcsToSpawn: 100
-    stationName: TEMP
+    stationName: "\u308F\u304B\u3070\u4E18"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   tutorialPanel: {fileID: 914811058}
   pauseMenuPanel: {fileID: 1772865879}
@@ -6993,7 +6993,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1217170927}
   - component: {fileID: 1217170926}
-  - component: {fileID: 1217170928}
   m_Layer: 0
   m_Name: JoyconManager
   m_TagString: Untagged
@@ -7030,18 +7029,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1300670554}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1217170928
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1217170925}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80f1a8a2e3d19184088dfe61ac2b0076, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1 &1220151451
 GameObject:
   m_ObjectHideFlags: 0
@@ -8372,52 +8359,6 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
---- !u!1 &1432041434
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1432041436}
-  - component: {fileID: 1432041435}
-  m_Layer: 0
-  m_Name: AruduinoInputManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1432041435
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1432041434}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7b168a1610524a44f8293d27222cdc68, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  fallbackPortName: COM3
-  baudRate: 9600
---- !u!4 &1432041436
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1432041434}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -2.060295, y: 3.821482, z: -0.05873399}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1443442829
 GameObject:
   m_ObjectHideFlags: 0
@@ -12079,7 +12020,6 @@ SceneRoots:
   - {fileID: 515846161}
   - {fileID: 519420032}
   - {fileID: 1214791178716069172}
-  - {fileID: 1432041436}
   - {fileID: 1300670554}
   - {fileID: 944620619}
   - {fileID: 1787355313}

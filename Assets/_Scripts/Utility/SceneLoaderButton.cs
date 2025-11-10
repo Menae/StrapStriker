@@ -5,9 +5,6 @@ public class SceneLoaderButton : MonoBehaviour
     [Tooltip("このボタンが遷移させるシーンの名前")]
     [SerializeField] private string sceneNameToLoad;
 
-    /// <summary>
-    /// UIボタンのOnClick()イベントから呼び出すためのメソッドです。
-    /// </summary>
     public void LoadTargetScene()
     {
         // SceneFaderがシーンに存在するか確認
