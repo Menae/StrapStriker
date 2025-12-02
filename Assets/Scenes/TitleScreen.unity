@@ -221,7 +221,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f3ed0b167132eab46ae7372fd52992c6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gripThreshold: 30
+  gripThreshold: 0
 --- !u!114 &616916674
 MonoBehaviour:
   m_ObjectHideFlags: 0

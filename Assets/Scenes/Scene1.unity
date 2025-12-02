@@ -2553,7 +2553,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f3ed0b167132eab46ae7372fd52992c6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gripThreshold: 20
+  gripThreshold: 1
 --- !u!114 &396537240
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6017,7 +6017,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   handPoint: {fileID: 1770777878}
-  gripThreshold: 1
+  gripThreshold: 0
   swayForceByAngle: 5
   swayForceByVelocity: 0.1
   swayIncreaseRate: 10
@@ -8055,7 +8055,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7c8dba8d84bfabc46b364aad0eb6ac74, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gripThreshold: 20
+  gripThreshold: 1
 --- !u!1001 &1404397288
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -10942,7 +10942,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bbeb4353af04a4c4dafebfe17fb23e75, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gripThreshold: 20
+  gripThreshold: 1
 --- !u!1 &1959143269
 GameObject:
   m_ObjectHideFlags: 0
