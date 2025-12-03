@@ -15,6 +15,12 @@ public class PlayerController : MonoBehaviour
     [Tooltip("この値以上の握力でつり革を掴みます")]
     public int gripThreshold = 500;
 
+    [Header("アニメーション制御")]
+    // 画像の左端の状態が何度か、右端の状態が何度かを設定
+    // 左に60度傾いた状態から右に60度傾いた状態までのアニメーションなら 60 を設定
+    [Tooltip("アニメーションの最大角度（片側）")]
+    public float swayMaxAngle = 60f;
+
     [Header("スイングアクション設定")]
     [Tooltip("Joy-Conの傾き角度がスイングの力に与える影響の大きさ")]
     public float swayForceByAngle = 20f;
@@ -274,17 +280,35 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
-        // アニメーションの状態を同期
         if (playerAnim != null)
         {
             playerAnim.SetInteger("State", (int)currentState);
+
+            if (currentState == PlayerState.Swaying || currentState == PlayerState.Grabbing)
+            {
+                // 1. 角度の取得
+                float currentAngle = transform.eulerAngles.z;
+                if (currentAngle > 180f) currentAngle -= 360f;
+
+                // 2. 基本の計算 (左向きの時はこれで正解)
+                // ※ もし左向きも逆になっている場合は、ここの引数を逆にしてください
+                float normalizedTime = Mathf.InverseLerp(swayMaxAngle, -swayMaxAngle, currentAngle);
+
+                // 右向きの補正
+                // 右を向いている場合(lastFacingDirectionが正)は、アニメーションの進行を反転させる
+                if (lastFacingDirection > 0)
+                {
+                    normalizedTime = 1f - normalizedTime;
+                }
+
+                playerAnim.SetFloat("SwayTime", normalizedTime);
+            }
         }
 
-        // キャラクターの向きを同期
         HandleDirection();
     }
 
-private void ChangeState(PlayerState newState)
+    private void ChangeState(PlayerState newState)
 {
     if (currentState == newState) return;
 
