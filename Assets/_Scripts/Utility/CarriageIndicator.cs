@@ -1,41 +1,53 @@
 ﻿using UnityEngine;
-using TMPro;
+using UnityEngine.UI; // Imageコンポーネントを使うために必要
 using System.Collections.Generic;
 
 public class CarriageIndicator : MonoBehaviour
 {
     // --- Inspectorで設定する項目 ---
-    [Header("UI設定")]
-    [Tooltip("車両番号を表示するTextMeshProコンポーネント")]
-    public TextMeshProUGUI carriageText;
 
     [Header("監視対象")]
     [Tooltip("位置を監視するプレイヤーのTransform")]
     public Transform playerTransform;
 
-    [Header("車両の境界設定")]
-    [Tooltip("各車両の範囲を定義するリスト")]
+    [Header("車両の設定")]
+    [Tooltip("各車両の範囲と画像を定義するリスト")]
     public List<CarriageBoundary> carriageBoundaries;
 
-    // --- 各車両の範囲を定義するためのデータ構造 ---
+    // --- 各車両の範囲と画像を定義するためのデータ構造 ---
     [System.Serializable]
     public class CarriageBoundary
     {
-        [Tooltip("UIに表示する名前（例：1両目）")]
+        [Tooltip("識別用の名前（例：1両目）")]
         public string displayName;
         [Tooltip("この車両が始まるX座標")]
         public float startX;
         [Tooltip("この車両が終わるX座標")]
         public float endX;
+
+        [Tooltip("この車両にいる時に有効化するImage")]
+        public Image targetImage;
     }
 
     // --- 内部変数 ---
     private int currentCarriageIndex = -1; // 現在いる車両のインデックス
 
+    void Start()
+    {
+        // ゲーム開始時に一旦すべての画像を非表示にしておく（初期状態の不整合を防ぐため）
+        foreach (var boundary in carriageBoundaries)
+        {
+            if (boundary.targetImage != null)
+            {
+                boundary.targetImage.gameObject.SetActive(false);
+            }
+        }
+    }
+
     void Update()
     {
-        // プレイヤーやテキストが設定されていなければ、処理を行わない
-        if (playerTransform == null || carriageText == null)
+        // プレイヤーが設定されていなければ処理を行わない
+        if (playerTransform == null)
         {
             return;
         }
@@ -49,15 +61,30 @@ public class CarriageIndicator : MonoBehaviour
             // プレイヤーが i番目の車両の範囲内にいるかチェック
             if (playerX >= carriageBoundaries[i].startX && playerX < carriageBoundaries[i].endX)
             {
-                // もし、前回チェックした時と違う車両にいたら
+                // もし、前回チェックした時と違う車両にいたら更新処理を行う
                 if (i != currentCarriageIndex)
                 {
-                    // UIテキストを更新し、現在の車両インデックスを記録
-                    carriageText.text = carriageBoundaries[i].displayName;
+                    UpdateCarriageImage(i);
                     currentCarriageIndex = i;
                 }
                 // 該当の車両を見つけたので、ループを抜ける
                 return;
+            }
+        }
+
+        // (オプション) どの車両範囲にもいない場合、画像をすべて消したい場合はここに処理を追加
+    }
+
+    // 画像の表示・非表示を更新するメソッド
+    private void UpdateCarriageImage(int newIndex)
+    {
+        for (int i = 0; i < carriageBoundaries.Count; i++)
+        {
+            if (carriageBoundaries[i].targetImage != null)
+            {
+                // 現在のインデックス(i)が、新しく入った車両のインデックス(newIndex)と一致すれば表示(true)、それ以外は非表示(false)
+                bool isActive = (i == newIndex);
+                carriageBoundaries[i].targetImage.gameObject.SetActive(isActive);
             }
         }
     }
