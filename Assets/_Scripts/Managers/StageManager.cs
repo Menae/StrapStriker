@@ -36,7 +36,7 @@ public class StageManager : MonoBehaviour
     public enum GameState { Tutorial, Playing, Paused, GameOver, StageClear }
     public GameState CurrentState { get; private set; }
 
-    public static Vector2 CurrentInertia { get; private set; } // 他のスクリプトから読み取れる慣性ベクトル
+    public static Vector2 CurrentInertia { get; private set; }
 
     [Header("慣性設定")]
     [Tooltip("加速/減速中に働く慣性力の強さ")]
@@ -54,15 +54,24 @@ public class StageManager : MonoBehaviour
     [Tooltip("このステージの駅イベントリスト。順番に設定してください。")]
     public List<StationEvent> stationEvents;
 
-    [Header("UI設定")]
+    [Header("UI設定 (パネル類)")]
     public GameObject tutorialPanel;
     public GameObject pauseMenuPanel;
     public GameObject gameOverPanel;
     public GameObject clearPanel;
-    public TextMeshProUGUI statusText;
+
+    [Header("UI設定 (テキスト類)")]
     public TextMeshProUGUI stationNameText;
     public TextMeshProUGUI congestionRateText;
     public TextMeshProUGUI defeatedNpcCountText;
+
+    [Header("UI設定 (ステータス表示オブジェクト)")]
+    [Tooltip("「減速中」の画像が含まれるゲームオブジェクト")]
+    public GameObject statusObjDecelerating;
+    [Tooltip("「停車中」の画像が含まれるゲームオブジェクト")]
+    public GameObject statusObjStopped;
+    [Tooltip("「加速中」の画像が含まれるゲームオブジェクト")]
+    public GameObject statusObjAccelerating;
 
     [Header("駅進捗UI設定")]
     [Tooltip("駅の位置を示す黄色いボールのImageコンポーネント")]
@@ -106,6 +115,9 @@ public class StageManager : MonoBehaviour
     private int currentStationIndex;
     private Coroutine blinkingEffectCoroutine;
 
+    // 表示状態管理用のEnum
+    private enum StatusDisplayType { None, Decelerating, Stopped, Accelerating }
+
     void Awake()
     {
         audioSource = GetComponent<AudioSource>();
@@ -118,7 +130,10 @@ public class StageManager : MonoBehaviour
         if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
         if (clearPanel != null) clearPanel.SetActive(false);
-        if (statusText != null) statusText.text = "停車中";
+
+        // 初期状態は「停車中」
+        SetStatusDisplay(StatusDisplayType.Stopped);
+
         if (stationNameText != null) stationNameText.text = "";
         CurrentInertia = Vector2.zero;
         Time.timeScale = 0f;
@@ -136,6 +151,32 @@ public class StageManager : MonoBehaviour
             {
                 TogglePause();
             }
+        }
+    }
+
+    // ★ ステータス表示を切り替えるメソッド
+    private void SetStatusDisplay(StatusDisplayType type)
+    {
+        // 全て一旦非表示にする（nullチェック付き）
+        if (statusObjDecelerating != null) statusObjDecelerating.SetActive(false);
+        if (statusObjStopped != null) statusObjStopped.SetActive(false);
+        if (statusObjAccelerating != null) statusObjAccelerating.SetActive(false);
+
+        // 指定されたものだけ有効化する
+        switch (type)
+        {
+            case StatusDisplayType.Decelerating:
+                if (statusObjDecelerating != null) statusObjDecelerating.SetActive(true);
+                break;
+            case StatusDisplayType.Stopped:
+                if (statusObjStopped != null) statusObjStopped.SetActive(true);
+                break;
+            case StatusDisplayType.Accelerating:
+                if (statusObjAccelerating != null) statusObjAccelerating.SetActive(true);
+                break;
+            case StatusDisplayType.None:
+                // 何も表示しない（すべてfalseのまま）
+                break;
         }
     }
 
@@ -208,7 +249,9 @@ public class StageManager : MonoBehaviour
 
     private IEnumerator StageProgressionCoroutine()
     {
-        if (statusText != null) statusText.text = "走行中";
+        // 走行中：何も表示しない
+        SetStatusDisplay(StatusDisplayType.None);
+
         if (stationNameText != null) stationNameText.text = "";
         CurrentInertia = Vector2.zero;
 
@@ -228,14 +271,17 @@ public class StageManager : MonoBehaviour
             }
         }
 
-        if (statusText != null) statusText.text = "走行中";
+        // 最終走行：何も表示しない
+        SetStatusDisplay(StatusDisplayType.None);
+
         if (stationNameText != null) stationNameText.text = "次は 終点";
         CurrentInertia = Vector2.zero;
 
         yield return new WaitForSeconds(finalRunDuration);
 
+        // 終点への減速：減速中表示
         if (stationNameText != null) stationNameText.text = "終点 まもなく到着";
-        if (statusText != null) statusText.text = ">>>減速中>>>";
+        SetStatusDisplay(StatusDisplayType.Decelerating);
         CurrentInertia = new Vector2(-inertiaForce, 0);
 
         yield return new WaitForSeconds(delayBeforeSpawn);
@@ -243,7 +289,7 @@ public class StageManager : MonoBehaviour
         {
             audioSource.PlayOneShot(arrivalSound.clip, arrivalSound.volume);
         }
-        StopBlinking(); // 終点到着で点滅停止
+        StopBlinking();
 
         yield return new WaitForSeconds(1.0f);
         TriggerStageClear();
@@ -251,24 +297,22 @@ public class StageManager : MonoBehaviour
 
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
-        // 駅接近開始：ParallaxControllerに駅背景へのクロスフェードを開始させる
+        // 駅接近開始
         if (parallaxController != null)
         {
             parallaxController.StartApproachingStation(station.stationBackgroundSprite);
         }
 
-        // UI表示を「減速中」に変更
+        // 減速中
         if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
-        if (statusText != null) statusText.text = ">>>減速中>>>";
+        SetStatusDisplay(StatusDisplayType.Decelerating);
         CurrentInertia = new Vector2(-inertiaForce, 0);
 
-        // 駅の演出時間（背景フェードや減速など）
         yield return new WaitForSeconds(delayBeforeSpawn);
 
-        // 駅に到着したので、進捗UIの点滅を停止
+        // 到着
         StopBlinking();
 
-        // 効果音を再生
         if (finalArrivalSound != null && finalArrivalSound.clip != null)
         {
             audioSource.PlayOneShot(finalArrivalSound.clip, finalArrivalSound.volume);
@@ -279,7 +323,6 @@ public class StageManager : MonoBehaviour
             DoorManager.OpenAllDoors();
         }
 
-        // NPCをスポーンさせ、混雑率を更新
         int spawnedCount = NPCManager.instance.SpawnNPCs(this, station.npcsToSpawn);
         currentCongestionRate += spawnedCount * rateDecreasePerNpc;
         UpdateCongestionUI();
@@ -290,36 +333,37 @@ public class StageManager : MonoBehaviour
             yield break;
         }
 
-        // 停車状態へ移行
-        if (statusText != null) statusText.text = "停車中";
+        // 停車中
+        SetStatusDisplay(StatusDisplayType.Stopped);
         CurrentInertia = Vector2.zero;
 
-        // 停車時間ぶん待機
         yield return new WaitForSeconds(stationStopTime);
 
-        // 駅出発：ParallaxControllerに通常背景へのクロスフェードを開始させる
+        // 駅出発
         if (parallaxController != null)
         {
             parallaxController.DepartFromStation();
         }
 
-        // UI表示を「加速中」に変更
+        // 加速中
         if (stationNameText != null) stationNameText.text = "";
-        if (statusText != null) statusText.text = "<<<加速中<<<";
+        SetStatusDisplay(StatusDisplayType.Accelerating);
         CurrentInertia = new Vector2(inertiaForce, 0);
 
-        // 加速時間ぶん待機
         yield return new WaitForSeconds(accelerationTime);
 
-        // 走行状態へ移行
-        if (statusText != null) statusText.text = "走行中";
+        // 走行中：何も表示しない
+        SetStatusDisplay(StatusDisplayType.None);
         CurrentInertia = Vector2.zero;
     }
 
     private void TriggerStageClear()
     {
         CurrentState = GameState.StageClear;
-        if (statusText != null) statusText.text = "終点";
+
+        // ステージクリア（終点到着）なので「停車中」を表示する
+        SetStatusDisplay(StatusDisplayType.Stopped);
+
         if (stationNameText != null) stationNameText.text = "";
         if (clearPanel != null) clearPanel.SetActive(true);
         Debug.Log("ステージクリア！");
