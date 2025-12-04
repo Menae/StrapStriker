@@ -351,40 +351,29 @@ public class PlayerController : MonoBehaviour
 
     private void ExecuteSwayingPhysics()
     {
-        // --- デバッグモード時のキーボード操作 ---
+        float inputTorque = 0f;
+
+        // --- 1. プレイヤー入力によるトルクの計算 ---
         if (debugMode)
         {
             float horizontalInput = Input.GetAxisRaw("Horizontal");
 
-            // キー入力がなければ、トルクをかけずに処理を終える(Swaying状態は維持)
-            if (Mathf.Abs(horizontalInput) < 0.1f)
+            // キー入力がある場合のみ処理
+            if (Mathf.Abs(horizontalInput) > 0.1f)
             {
-                return;
+                // スイング入力があるので、状態をSwayingに設定する
+                ChangeState(PlayerState.Swaying);
+
+                // キーが押されている間は常にパワーが増加する
+                float powerIncrease = swayIncreaseRate * Time.fixedDeltaTime;
+                swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
+                Debug.Log($"<color=yellow>[DEBUG]</color> <color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
+
+                // 入力方向 * 力 * (パワー倍率)
+                inputTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
-
-            // スイング入力があるので、状態をSwayingに設定する
-            ChangeState(PlayerState.Swaying);
-
-            // キーが押されている間は常にパワーが増加する
-            float powerIncrease = swayIncreaseRate * Time.fixedDeltaTime;
-            swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
-            Debug.Log($"<color=yellow>[DEBUG]</color> <color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
-
-            // 基本となるトルクを計算
-            float totalTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
-
-            // スイング方向と慣性の方向が逆であるかチェック
-            // 加速中(+)は左(-)に振ると、減速中(-)は右(+)に振るとボーナス
-            if (Mathf.Sign(horizontalInput) != Mathf.Sign(StageManager.CurrentInertia.x) && StageManager.CurrentInertia.x != 0)
-            {
-                // 方向が逆（慣性に沿ったスイング）なら、慣性ボーナスを加える
-                totalTorque += StageManager.CurrentInertia.x * inertiaSwingBonus * -Mathf.Sign(horizontalInput); // 慣性の力でスイングを後押しする
-            }
-
-            rb.AddTorque(totalTorque);
         }
-        // --- 通常時のJoy-Con操作 ---
-        else
+        else // Joy-Con操作
         {
             if (joycon == null) return;
 
@@ -408,28 +397,16 @@ public class PlayerController : MonoBehaviour
                 ChangeState(PlayerState.Swaying);
             }
 
-            // トルクをかけ、タイミングが良い時だけパワーを溜める
-            // スイング入力がある場合(デッドゾーン外の場合)
+            // 入力がある場合、入力トルクを計算
             if (normalizedForce != 0)
             {
-                // 基本となるトルクを計算
-                float totalTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
-
-                // スイング方向と慣性の方向が「逆」であるかチェック
-                if (Mathf.Sign(normalizedForce) != Mathf.Sign(StageManager.CurrentInertia.x) && StageManager.CurrentInertia.x != 0)
-                {
-                    // 方向が逆（＝慣性に沿ったスイング）なら、慣性ボーナスを加える
-                    totalTorque += StageManager.CurrentInertia.x * inertiaSwingBonus * -Mathf.Sign(normalizedForce);
-                }
-
-                rb.AddTorque(totalTorque);
+                inputTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
 
-            // タイミングが良いか判定
+            // タイミングが良い時だけパワーを蓄積 (既存ロジック維持)
             bool isTimingGood = (yawVelocity > swingVelocityThreshold && normalizedForce > 0) ||
                                 (yawVelocity < -swingVelocityThreshold && normalizedForce < 0);
 
-            // タイミングが良い時だけパワーを蓄積
             if (isTimingGood)
             {
                 float powerIncrease = (Mathf.Abs(normalizedForce) + Mathf.Abs(yawVelocity) * swayForceByVelocity)
@@ -438,6 +415,29 @@ public class PlayerController : MonoBehaviour
                 swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
                 Debug.Log($"<color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
             }
+        }
+
+        // --- 2. 慣性によるトルクの計算 ---
+        // 条件分岐で符号を変えるのではなく、単純に環境の力を加算。
+        // 慣性(X成分)を回転力に変換。
+        // 右向き(+X)の慣性が働くと、つり革は反時計回り(+Z回転)に振られる。
+        // 係数 inertiaSwingBonus を使って強さを調整してください。
+        float inertiaTorque = 0f;
+        if (StageManager.CurrentInertia.x != 0)
+        {
+            inertiaTorque = StageManager.CurrentInertia.x * inertiaSwingBonus;
+        }
+
+        // --- 3. 合算して適用 ---
+        // 入力と慣性を足し合わせることで、自然な物理挙動になる。
+        // (例: 右入力(+20) + 右慣性(+50) = 超加速(+70))
+        // (例: 左入力(-20) + 右慣性(+50) = 押し負けて右へ(+30))
+        float totalTorque = inputTorque + inertiaTorque;
+
+        // わずかでも力があれば適用
+        if (Mathf.Abs(totalTorque) > 0.01f)
+        {
+            rb.AddTorque(totalTorque);
         }
     }
 

@@ -282,7 +282,9 @@ public class StageManager : MonoBehaviour
         // 終点への減速：減速中表示
         if (stationNameText != null) stationNameText.text = "終点 まもなく到着";
         SetStatusDisplay(StatusDisplayType.Decelerating);
-        CurrentInertia = new Vector2(-inertiaForce, 0);
+
+        // 減速中は、慣性力は進行方向(右、プラス)に働きます
+        CurrentInertia = new Vector2(inertiaForce, 0);
 
         yield return new WaitForSeconds(delayBeforeSpawn);
         if (arrivalSound != null && arrivalSound.clip != null)
@@ -306,7 +308,9 @@ public class StageManager : MonoBehaviour
         // 減速中
         if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
         SetStatusDisplay(StatusDisplayType.Decelerating);
-        CurrentInertia = new Vector2(-inertiaForce, 0);
+
+        // 減速中は、慣性力は進行方向(右、プラス)に働きます
+        CurrentInertia = new Vector2(inertiaForce, 0);
 
         yield return new WaitForSeconds(delayBeforeSpawn);
 
@@ -348,7 +352,9 @@ public class StageManager : MonoBehaviour
         // 加速中
         if (stationNameText != null) stationNameText.text = "";
         SetStatusDisplay(StatusDisplayType.Accelerating);
-        CurrentInertia = new Vector2(inertiaForce, 0);
+
+        // 加速中は、慣性力は後方(左、マイナス)に働きます
+        CurrentInertia = new Vector2(-inertiaForce, 0);
 
         yield return new WaitForSeconds(accelerationTime);
 

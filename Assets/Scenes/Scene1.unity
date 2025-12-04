@@ -6064,7 +6064,7 @@ MonoBehaviour:
   inertiaBonusMultiplier: 2
   inertiaSwingBonus: 1.5
   gripReleaseGracePeriod: 0.1
-  debugMode: 1
+  debugMode: 0
   inputDelayAfterStart: 0.1
 --- !u!61 &1082202013
 BoxCollider2D:
@@ -6449,7 +6449,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7351b9388d44f1742b9d3e33ec4cf503, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  inertiaForce: 0
+  inertiaForce: 2.5
   initialCongestionRate: 100
   maxCongestionRate: 300
   rateDecreasePerNpc: 1
