@@ -6464,15 +6464,15 @@ MonoBehaviour:
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
     npcsToSpawn: 70
-    stationName: "\u307B\u306E\u5CE0"
+    stationName: "\u307F\u306A\u3082\u6A4B"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
     npcsToSpawn: 80
-    stationName: "\u3061\u3050\u3055\u91CE"
+    stationName: "\u3064\u3070\u3055\u516C\u5712"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
     npcsToSpawn: 100
-    stationName: "\u308F\u304B\u3070\u4E18"
+    stationName: "\u3042\u304A\u305E\u3089\u7A7A\u6E2F"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   tutorialPanel: {fileID: 914811058}
   pauseMenuPanel: {fileID: 1772865879}
@@ -10663,7 +10663,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: b7a7139c37941b14abfbbca84c40b535, type: 3}
+  m_Sprite: {fileID: 21300000, guid: a6e94687dbbc5a043add390b97caec73, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
