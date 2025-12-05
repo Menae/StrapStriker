@@ -249,10 +249,22 @@ public class StageManager : MonoBehaviour
 
     private IEnumerator StageProgressionCoroutine()
     {
-        // 走行中：何も表示しない
+        // 走行中：何も表示しない -> 「次は～」を表示に変更
         SetStatusDisplay(StatusDisplayType.None);
 
-        if (stationNameText != null) stationNameText.text = "";
+        if (stationNameText != null)
+        {
+            // 最初の駅がある場合、開始直後から表示する
+            if (stationEvents.Count > 0)
+            {
+                stationNameText.text = $"次は {stationEvents[0].stationName}";
+            }
+            else
+            {
+                stationNameText.text = "";
+            }
+        }
+
         CurrentInertia = Vector2.zero;
 
         foreach (var station in stationEvents)
@@ -269,9 +281,15 @@ public class StageManager : MonoBehaviour
                 }
                 StartBlinking();
             }
+
+            // 次の駅へ向かうため、表示を更新する
+            if (stationNameText != null && currentStationIndex < stationEvents.Count)
+            {
+                stationNameText.text = $"次は {stationEvents[currentStationIndex].stationName}";
+            }
         }
 
-        // 最終走行：何も表示しない
+        // 最終走行
         SetStatusDisplay(StatusDisplayType.None);
 
         if (stationNameText != null) stationNameText.text = "次は 終点";
@@ -306,7 +324,7 @@ public class StageManager : MonoBehaviour
         }
 
         // 減速中
-        if (stationNameText != null) stationNameText.text = $" まもなく{station.stationName}";
+        if (stationNameText != null) stationNameText.text = $"まもなく {station.stationName}";
         SetStatusDisplay(StatusDisplayType.Decelerating);
 
         // 減速中は、慣性力は進行方向(右、プラス)に働きます
@@ -349,8 +367,6 @@ public class StageManager : MonoBehaviour
             parallaxController.DepartFromStation();
         }
 
-        // 加速中
-        if (stationNameText != null) stationNameText.text = "";
         SetStatusDisplay(StatusDisplayType.Accelerating);
 
         // 加速中は、慣性力は後方(左、マイナス)に働きます

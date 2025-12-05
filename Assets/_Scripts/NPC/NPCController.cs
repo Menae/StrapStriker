@@ -141,10 +141,11 @@ public class NPCController : MonoBehaviour
         // 衝撃が「倒れる」しきい値を超えた場合
         if (impactMagnitude > fallenThreshold)
         {
-            // 死亡が確定した瞬間に、StageManagerにSEの再生を依頼する
+            // 死亡が確定した瞬間に、StageManagerに報告する（即時反映）
             if (stageManager != null)
             {
                 stageManager.PlayNpcDefeatSound();
+                stageManager.OnNpcDefeated(); // ここでカウント加算
             }
 
             currentState = NPCState.KnockedDown;
@@ -192,15 +193,7 @@ public class NPCController : MonoBehaviour
             yield return null;
         }
 
-        // 司令塔に報告
-        if (stageManager != null)
-        {
-            stageManager.OnNpcDefeated();
-        }
-        else
-        {
-            Debug.LogError("<color=red>エラー: StageManagerへの参照がありません！報告できませんでした。</color>");
-        }
+        // ※ここでOnNpcDefeatedを呼ぶと二重カウントになるため削除しました
 
         // 完全に消滅したら、プールに自身を返却する
         NPCPool.instance.ReturnNPC(this.gameObject);
