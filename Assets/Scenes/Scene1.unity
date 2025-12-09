@@ -2269,7 +2269,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f3ed0b167132eab46ae7372fd52992c6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gripThreshold: 1
+  gripThreshold: 0
 --- !u!114 &396537240
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3058,8 +3058,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -13.3, y: 515.67}
-  m_SizeDelta: {x: 497.8, y: 47.2}
+  m_AnchoredPosition: {x: -28.7, y: 515.67}
+  m_SizeDelta: {x: 672.1, y: 47.2}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &519688822
 MonoBehaviour:
@@ -6036,6 +6036,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   handPoint: {fileID: 1770777878}
   gripThreshold: 0
+  useDirectControl: 1
+  invertDirectControl: 1
+  directControlInputRange: 30
+  directControlSmoothSpeed: 5
   swayMaxAngle: 60
   swayForceByAngle: 5
   swayForceByVelocity: 0.1
@@ -6064,7 +6068,7 @@ MonoBehaviour:
   inertiaBonusMultiplier: 2
   inertiaSwingBonus: 1.5
   gripReleaseGracePeriod: 0.1
-  debugMode: 1
+  debugMode: 0
   inputDelayAfterStart: 0.1
 --- !u!61 &1082202013
 BoxCollider2D:
@@ -6455,23 +6459,23 @@ MonoBehaviour:
   rateDecreasePerNpc: 0.33
   stationEvents:
   - timeToArrival: 10
-    npcsToSpawn: 70
+    npcsToSpawn: 30
     stationName: "\u3044\u308D\u306F\u5742"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
-    npcsToSpawn: 60
+    npcsToSpawn: 40
     stationName: "\u3068\u304D\u306E\u753A"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
-    npcsToSpawn: 70
+    npcsToSpawn: 45
     stationName: "\u307F\u306A\u3082\u6A4B"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
-    npcsToSpawn: 80
+    npcsToSpawn: 60
     stationName: "\u3064\u3070\u3055\u516C\u5712"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   - timeToArrival: 10
-    npcsToSpawn: 100
+    npcsToSpawn: 80
     stationName: "\u3042\u304A\u305E\u3089\u7A7A\u6E2F"
     stationBackgroundSprite: {fileID: 21300000, guid: 6f38d6cbbc328714c95abe12d1baf168, type: 3}
   tutorialPanel: {fileID: 914811058}

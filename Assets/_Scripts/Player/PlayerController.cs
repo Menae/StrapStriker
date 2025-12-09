@@ -15,6 +15,16 @@ public class PlayerController : MonoBehaviour
     [Tooltip("この値以上の握力でつり革を掴みます")]
     public int gripThreshold = 500;
 
+    [Header("テスト機能: 直感操作モード")]
+    [Tooltip("ONにすると物理挙動を無視してJoy-Conの角度とキャラクターの角度を完全同期させる")]
+    public bool useDirectControl = false;
+    [Tooltip("操作が逆になる場合はチェックを入れる")]
+    public bool invertDirectControl = true;
+    [Tooltip("Joy-Conを何度傾けたらMAXとみなすか（値を大きくすると動きがマイルドになる）")]
+    public float directControlInputRange = 90f;
+    [Tooltip("追従速度（値を小さくすると重みのあるゆっくりした動きになります）")]
+    public float directControlSmoothSpeed = 5f;
+
     [Header("アニメーション制御")]
     // 画像の左端の状態が何度か、右端の状態が何度かを設定
     // 左に60度傾いた状態から右に60度傾いた状態までのアニメーションなら 60 を設定
@@ -248,21 +258,16 @@ public class PlayerController : MonoBehaviour
         }
         else if (currentState == PlayerState.Launched)
         {
-            // もし接地判定がtrueになったら（＝着地寸前なら）
+            // (中略...既存のLaunched処理はそのまま)
             if (IsGrounded())
             {
-                // 状態をアイドルに戻す
                 ChangeState(PlayerState.Idle);
-                // 体を直立に戻す
                 rb.rotation = 0f;
-                // 現在の速度にブレーキをかける
                 rb.velocity = new Vector2(rb.velocity.x * groundBrakingFactor, rb.velocity.y);
-                // 回転を固定する
                 rb.constraints = RigidbodyConstraints2D.FreezeRotation;
             }
             else
             {
-                // まだ空中にいる場合は、従来通り姿勢制御を続ける
                 Quaternion targetRotation = Quaternion.identity;
                 Quaternion newRotation = Quaternion.Slerp(
                     rb.transform.rotation,
@@ -273,9 +278,12 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // デバッグモード中は減衰率を0に、そうでなければ通常の値を使用する
-        float currentDecayRate = debugMode ? 0f : swayDecayRate;
-        swayPower = Mathf.Max(0, swayPower - currentDecayRate * Time.fixedDeltaTime);
+        // 直感操作モードONの時は、ExecuteSwayingPhysics内でpowerが上書きされるため減衰させない
+        if (!useDirectControl)
+        {
+            float currentDecayRate = debugMode ? 0f : swayDecayRate;
+            swayPower = Mathf.Max(0, swayPower - currentDecayRate * Time.fixedDeltaTime);
+        }
     }
 
     private void LateUpdate()
@@ -351,6 +359,72 @@ public class PlayerController : MonoBehaviour
 
     private void ExecuteSwayingPhysics()
     {
+        // =================================================================
+        // 直感操作モード
+        // =================================================================
+        if (useDirectControl)
+        {
+            if (joycon == null && !debugMode) return;
+
+            float inputRatio = 0f;
+
+            if (debugMode)
+            {
+                // デバッグモード: キーボード入力 (-1 ~ 1)
+                inputRatio = Input.GetAxisRaw("Horizontal");
+            }
+            else
+            {
+                // Joy-Conの仕様上、ケーブル側(下)を180度とし、そこからの差分を取る
+                Quaternion orientation = joycon.GetVector();
+                float currentYaw = orientation.eulerAngles.y;
+
+                // 180度を基準とした角度差分を取得 (-180 ~ 180)
+                float angleDifference = Mathf.DeltaAngle(180f, currentYaw);
+
+                // 設定した範囲(directControlInputRange)で割って -1 ~ 1 に正規化
+                // rangeが90の場合、90度傾けると1.0(MAX)になる
+                // rangeを大きくする(120など)と、より大きく傾けないとMAXにならず、感度が下がる
+                inputRatio = Mathf.Clamp(angleDifference / directControlInputRange, -1f, 1f);
+            }
+
+            // 反転フラグがONなら入力を逆にする
+            if (invertDirectControl)
+            {
+                inputRatio *= -1f;
+            }
+
+            // 1. 目標角度の計算
+            // inputRatio (-1 ~ 1) に 最大角度(swayMaxAngle) を掛ける
+            // Unityの2D回転は「左回転(反時計回り)がプラス」。
+            // 右に入力(+1)した時、キャラは右(時計回り、マイナス角)に行ってほしいのでマイナスを掛ける。
+            float targetAngle = -inputRatio * swayMaxAngle;
+
+            // 2. 現在の角度から目標角度へスムーズに回転させる
+            float currentZ = transform.eulerAngles.z;
+            if (currentZ > 180f) currentZ -= 360f; // -180~180表現に変換
+
+            // Lerpで補間移動。Speedの値で追従性を調整
+            float newZ = Mathf.Lerp(currentZ, targetAngle, Time.fixedDeltaTime * directControlSmoothSpeed);
+            rb.MoveRotation(newZ);
+
+            // 3. 物理挙動の干渉を防ぐ（慣性で揺れ戻しが起きないようにする）
+            rb.angularVelocity = 0f;
+
+            // 4. パワーの自動計算
+            // 直感操作モードでは「振って溜める」ことができないため、
+            // 「傾きが大きい＝パワーが溜まっている」とみなして発射力を確保する
+            float anglePowerRatio = Mathf.Abs(newZ) / swayMaxAngle;
+            swayPower = anglePowerRatio * maxSwayPower;
+
+            // 物理モードの処理は行わずに終了
+            return;
+        }
+
+        // =================================================================
+        // 通常モード: 物理演算によるスイング
+        // =================================================================
+
         float inputTorque = 0f;
 
         // --- 1. プレイヤー入力によるトルクの計算 ---
@@ -361,15 +435,12 @@ public class PlayerController : MonoBehaviour
             // キー入力がある場合のみ処理
             if (Mathf.Abs(horizontalInput) > 0.1f)
             {
-                // スイング入力があるので、状態をSwayingに設定する
                 ChangeState(PlayerState.Swaying);
 
-                // キーが押されている間は常にパワーが増加する
                 float powerIncrease = swayIncreaseRate * Time.fixedDeltaTime;
                 swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
                 Debug.Log($"<color=yellow>[DEBUG]</color> <color=green>パワー増加</color> => 現在のパワー: <b>{swayPower.ToString("F1")}</b>");
 
-                // 入力方向 * 力 * (パワー倍率)
                 inputTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
         }
@@ -377,14 +448,12 @@ public class PlayerController : MonoBehaviour
         {
             if (joycon == null) return;
 
-            // Joy-Conから角度と角速度を取得
             Quaternion orientation = joycon.GetVector();
             Vector3 eulerAngles = orientation.eulerAngles;
             float currentYaw = eulerAngles.y;
             float yawVelocity = Mathf.DeltaAngle(lastYaw, currentYaw) / Time.fixedDeltaTime;
             lastYaw = currentYaw;
 
-            // 角度に基づいて力の方向を計算し、Stateを更新
             float normalizedForce = 0f;
             if (currentYaw > rightSwingAngleMin && currentYaw < rightSwingAngleMax)
             {
@@ -397,13 +466,11 @@ public class PlayerController : MonoBehaviour
                 ChangeState(PlayerState.Swaying);
             }
 
-            // 入力がある場合、入力トルクを計算
             if (normalizedForce != 0)
             {
                 inputTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
 
-            // タイミングが良い時だけパワーを蓄積 (既存ロジック維持)
             bool isTimingGood = (yawVelocity > swingVelocityThreshold && normalizedForce > 0) ||
                                 (yawVelocity < -swingVelocityThreshold && normalizedForce < 0);
 
@@ -418,10 +485,6 @@ public class PlayerController : MonoBehaviour
         }
 
         // --- 2. 慣性によるトルクの計算 ---
-        // 条件分岐で符号を変えるのではなく、単純に環境の力を加算。
-        // 慣性(X成分)を回転力に変換。
-        // 右向き(+X)の慣性が働くと、つり革は反時計回り(+Z回転)に振られる。
-        // 係数 inertiaSwingBonus を使って強さを調整してください。
         float inertiaTorque = 0f;
         if (StageManager.CurrentInertia.x != 0)
         {
@@ -429,12 +492,8 @@ public class PlayerController : MonoBehaviour
         }
 
         // --- 3. 合算して適用 ---
-        // 入力と慣性を足し合わせることで、自然な物理挙動になる。
-        // (例: 右入力(+20) + 右慣性(+50) = 超加速(+70))
-        // (例: 左入力(-20) + 右慣性(+50) = 押し負けて右へ(+30))
         float totalTorque = inputTorque + inertiaTorque;
 
-        // わずかでも力があれば適用
         if (Mathf.Abs(totalTorque) > 0.01f)
         {
             rb.AddTorque(totalTorque);
