@@ -1,7 +1,15 @@
 ﻿using UnityEngine;
 
+/// <summary>
+/// ゲーム終了ボタンの処理を管理するハンドラー。
+/// プラットフォームに応じて適切な終了処理を実行する。
+/// </summary>
 public class QuitButtonHandler : MonoBehaviour
 {
+    /// <summary>
+    /// ゲームを終了する。
+    /// エディタ実行時は再生モードを停止、WebGLでは警告ログのみ、スタンドアロンビルドではアプリケーションを終了する。
+    /// </summary>
     public void QuitGame()
     {
         Debug.Log("ゲームを終了しようとしています...");

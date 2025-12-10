@@ -2,18 +2,27 @@
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 
+/// <summary>
+/// シーンごとのBGMを自動切り替えするマネージャー。
+/// シングルトンパターンで、シーン遷移時にも破棄されない。
+/// </summary>
 [RequireComponent(typeof(AudioSource))]
 public class BGMManager : MonoBehaviour
 {
     public static BGMManager instance;
 
+    /// <summary>
+    /// シーンとBGMの紐付けを定義するクラス。
+    /// </summary>
     [System.Serializable]
     public class SceneBGM
     {
         [Tooltip("対象のシーン名")]
         public string sceneName;
+
         [Tooltip("そのシーンで流すBGM")]
         public AudioClip bgmClip;
+
         [Tooltip("BGMの音量")]
         [Range(0f, 1f)]
         public float volume = 0.7f;
@@ -26,67 +35,70 @@ public class BGMManager : MonoBehaviour
     private AudioSource audioSource;
     private string currentSceneName;
 
+    /// <summary>
+    /// 初期化処理。シングルトンの確立とAudioSourceの設定を行う。
+    /// </summary>
     void Awake()
     {
         if (instance == null)
         {
-            // 誰もインスタンスを持っていなければ、自分がインスタンスになる
             instance = this;
-            // シーンをまたいでも破棄されないようにする
             DontDestroyOnLoad(gameObject);
         }
         else
         {
-            // 既にインスタンスが存在する場合は、自分を破棄する
             Destroy(gameObject);
             return;
         }
 
-        // 自身のAudioSourceコンポーネントを取得し、ループ再生を有効にする
         audioSource = GetComponent<AudioSource>();
         audioSource.loop = true;
     }
 
+    /// <summary>
+    /// オブジェクトが有効化された時、シーンロードイベントに登録する。
+    /// </summary>
     void OnEnable()
     {
-        // シーンがロードされた時に呼ばれるメソッドを登録
         SceneManager.sceneLoaded += OnSceneLoaded;
     }
 
+    /// <summary>
+    /// オブジェクトが無効化された時、シーンロードイベントから登録解除する。
+    /// </summary>
     void OnDisable()
     {
-        // オブジェクトが破棄される時に、登録を解除
         SceneManager.sceneLoaded -= OnSceneLoaded;
     }
 
-    // シーンがロードされた時に実行されるメソッド
+    /// <summary>
+    /// シーンがロードされた時に実行される。
+    /// シーン名に応じたBGMを検索し、異なる曲であれば切り替える。
+    /// </summary>
+    /// <param name="scene">ロードされたシーン</param>
+    /// <param name="mode">ロードモード</param>
     void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        // もしロードされたのが同じシーンなら、BGMは変更しない
         if (scene.name == currentSceneName)
         {
             return;
         }
         currentSceneName = scene.name;
 
-        // 設定リストの中から、新しいシーン名に一致するBGMを探す
         foreach (var sceneBgm in sceneBgmList)
         {
             if (sceneBgm.sceneName == scene.name)
             {
-                // もし既に同じ曲が流れていたら、何もしない
                 if (audioSource.clip == sceneBgm.bgmClip)
                 {
                     return;
                 }
 
-                // BGMを新しい曲に設定し、再生する
                 audioSource.Stop();
                 audioSource.clip = sceneBgm.bgmClip;
                 audioSource.volume = sceneBgm.volume;
                 audioSource.Play();
 
-                // 対応するBGMが見つかったのでループを抜ける
                 return;
             }
         }

@@ -1,6 +1,10 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>
+/// NPC全体のスポーン、状態管理、Physics LODを統括するマネージャー。
+/// ドア周辺への集中スポーンとプレイヤー距離に基づくアクティベーションを制御する。
+/// </summary>
 public class NPCManager : MonoBehaviour
 {
     public static NPCManager instance;
@@ -34,10 +38,13 @@ public class NPCManager : MonoBehaviour
     [Range(0f, 1f)]
     public float burstPercentage = 0.8f;
 
-    // 現在シーンに存在している（プールから取り出されている）全NPCのリスト
     private List<NPCController> spawnedNpcs = new List<NPCController>();
     private Transform playerTransform;
 
+    /// <summary>
+    /// シングルトンの初期化。
+    /// 既に別のインスタンスが存在する場合は自身を破棄する。
+    /// </summary>
     private void Awake()
     {
         if (instance == null)
@@ -50,40 +57,39 @@ public class NPCManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// プレイヤーTransformの取得とNPC状態更新の定期実行を開始。
+    /// InvokeRepeatingでcheckInterval秒ごとにUpdateNpcStatesを呼び出す。
+    /// </summary>
     void Start()
     {
-        // プレイヤーのTransformをキャッシュしておく
         playerTransform = FindObjectOfType<PlayerController>().transform;
-
-        // 指定した間隔でNPCの状態を更新する処理を予約
         InvokeRepeating(nameof(UpdateNpcStates), 0f, checkInterval);
     }
 
     /// <summary>
-    /// StageManagerの指示でNPCをスポーンさせる
+    /// StageManagerの指示でNPCをスポーンさせる。
+    /// ドアが設定されている場合はドア周辺に集中・拡散スポーンを実行し、
+    /// 未設定の場合はエリア内ランダムスポーンにフォールバックする。
     /// </summary>
     /// <param name="manager">呼び出し元のStageManager</param>
     /// <param name="count">スポーンさせる数</param>
     /// <returns>実際にスポーンした数</returns>
     public int SpawnNPCs(StageManager manager, int count)
     {
-        // ドアが1つも設定されていない場合は、以前のロジックでスポーンする
         if (doorSpawnPoints == null || doorSpawnPoints.Count == 0)
         {
             Debug.LogWarning("ドアが設定されていません。通常のランダムスポーンを実行します。");
-            return SpawnNPCsInArea(manager, count); // 古いロジックを呼び出す
+            return SpawnNPCsInArea(manager, count);
         }
 
         int spawnedCount = 0;
-        // 集中スポーンさせるNPCの数を計算
         int burstCount = Mathf.FloorToInt(count * burstPercentage);
 
-        // --- フェーズ1: 集中スポーン (Burst) ---
+        // フェーズ1: ドア真ん前に集中スポーン
         for (int i = 0; i < burstCount; i++)
         {
             Transform randomDoor = doorSpawnPoints[Random.Range(0, doorSpawnPoints.Count)];
-
-            // X座標だけをランダムにし、Y座標はドアの位置に固定する
             float randomXOffset = Random.Range(-burstRadius, burstRadius);
             Vector2 spawnPos = new Vector2(randomDoor.position.x + randomXOffset, randomDoor.position.y);
 
@@ -91,13 +97,11 @@ public class NPCManager : MonoBehaviour
             spawnedCount++;
         }
 
-        // --- フェーズ2: 拡散スポーン (Spread) ---
+        // フェーズ2: ドア周辺に拡散スポーン
         int spreadCount = count - burstCount;
         for (int i = 0; i < spreadCount; i++)
         {
             Transform randomDoor = doorSpawnPoints[Random.Range(0, doorSpawnPoints.Count)];
-
-            // X座標だけをランダムにし、Y座標はドアの位置に固定する
             float randomXOffset = Random.Range(-spreadRadius, spreadRadius);
             Vector2 spawnPos = new Vector2(randomDoor.position.x + randomXOffset, randomDoor.position.y);
 
@@ -108,7 +112,12 @@ public class NPCManager : MonoBehaviour
         return spawnedCount;
     }
 
-    // 1体のNPCを特定の位置にスポーンさせる処理
+    /// <summary>
+    /// 1体のNPCをプールから取得し、指定座標にスポーンさせる。
+    /// NPCControllerにStageManagerを紐づけ、管理リストに追加する。
+    /// </summary>
+    /// <param name="manager">StageManagerインスタンス</param>
+    /// <param name="position">スポーン座標</param>
     private void SpawnSingleNPC(StageManager manager, Vector2 position)
     {
         GameObject npcObject = NPCPool.instance.GetNPC();
@@ -122,7 +131,13 @@ public class NPCManager : MonoBehaviour
         }
     }
 
-    // 古いエリア内ランダムスポーンのロジック
+    /// <summary>
+    /// ドアが未設定の場合のフォールバック処理。
+    /// spawnAreaCenter/Sizeで定義されたエリア内にX軸ランダム、Y軸固定でNPCをスポーンする。
+    /// </summary>
+    /// <param name="manager">StageManagerインスタンス</param>
+    /// <param name="count">スポーン数</param>
+    /// <returns>実際にスポーンした数</returns>
     private int SpawnNPCsInArea(StageManager manager, int count)
     {
         for (int i = 0; i < count; i++)
@@ -137,20 +152,23 @@ public class NPCManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 混雑率からNPCの数を計算してスポーンする
+    /// 混雑率から必要なNPC数を逆算してスポーンする。
+    /// rateDecreasePerNpcが0の場合はゼロ除算を防ぐため何もしない。
     /// </summary>
-    /// <param name="manager">呼び出し元のStageManager</param>
+    /// <param name="manager">StageManagerインスタンス</param>
     /// <param name="congestionRate">現在の混雑率</param>
     public void SpawnNPCsForCongestion(StageManager manager, float congestionRate)
     {
-        // rateDecreasePerNpcが0だとエラーになるのを防ぐ
         if (manager.rateDecreasePerNpc <= 0) return;
 
         int count = Mathf.FloorToInt(congestionRate / manager.rateDecreasePerNpc);
         SpawnNPCs(manager, count);
     }
 
-    // 全NPCの状態を更新する（Physics LOD）
+    /// <summary>
+    /// InvokeRepeatingで定期実行されるPhysics LOD処理。
+    /// プレイヤーとの距離を計測し、activationRadius内のNPCをアクティブ化、範囲外を非アクティブ化する。
+    /// </summary>
     void UpdateNpcStates()
     {
         if (playerTransform == null) return;
@@ -161,22 +179,23 @@ public class NPCManager : MonoBehaviour
 
             float distance = Vector2.Distance(npc.transform.position, playerTransform.position);
 
-            // プレイヤーとの距離に応じて、物理演算などを有効化/無効化
             if (distance < activationRadius)
             {
-                npc.Activate(); // 範囲内ならアクティブに
+                npc.Activate();
             }
             else
             {
-                npc.Deactivate(); // 範囲外ならスリープさせる
+                npc.Deactivate();
             }
         }
     }
 
-    // UnityエディタのSceneビューに、スポーン範囲を視覚的に表示する
+    /// <summary>
+    /// Sceneビューにスポーン範囲を半透明の緑色キューブで可視化する。
+    /// </summary>
     private void OnDrawGizmosSelected()
     {
-        Gizmos.color = new Color(0, 1, 0, 0.5f); // 半透明の緑色
+        Gizmos.color = new Color(0, 1, 0, 0.5f);
         Gizmos.DrawCube(spawnAreaCenter, spawnAreaSize);
     }
 }

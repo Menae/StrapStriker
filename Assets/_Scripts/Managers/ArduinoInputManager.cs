@@ -4,6 +4,10 @@ using System.Threading;
 using System;
 using System.IO;
 
+/// <summary>
+/// Arduinoとの通信を管理し、握力センサーの値をリアルタイムで取得する。
+/// シングルトンパターンで実装され、別スレッドでシリアル通信を行う。
+/// </summary>
 public class ArduinoInputManager : MonoBehaviour
 {
     public static ArduinoInputManager instance;
@@ -14,25 +18,31 @@ public class ArduinoInputManager : MonoBehaviour
     [Tooltip("Arduinoと合わせるボーレート (通信速度)")]
     public int baudRate = 9600;
 
+    /// <summary>
+    /// Arduinoとの接続状態を取得する。
+    /// </summary>
     public bool IsConnected { get; private set; } = false;
 
-    // --- 他のスクリプトから参照する握力センサーの値 ---
+    /// <summary>
+    /// 他のスクリプトから参照する握力センサーの値。
+    /// 別スレッドから書き込まれるため、volatileキーワードで可視性を保証する。
+    /// </summary>
     public static volatile int GripValue;
 
-    // --- 内部変数 ---
     private SerialPort serialPort;
     private Thread readThread;
     private bool isThreadRunning = false;
 
+    /// <summary>
+    /// シングルトンの初期化と設定ファイルの読み込みを行う。
+    /// 最初に生成されたインスタンス以外は破棄される。
+    /// </summary>
     void Awake()
     {
-        // シングルトンパターンの実装
         if (instance == null)
         {
             instance = this;
-            DontDestroyOnLoad(gameObject); // シーンをまたいでも破棄されないようにする
-
-            // 設定ファイルを読み込んで、フォールバック用のポート番号を上書きする
+            DontDestroyOnLoad(gameObject);
             LoadConfig();
         }
         else
@@ -41,15 +51,21 @@ public class ArduinoInputManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// ゲーム開始時にArduinoへの接続を試みる。
+    /// Awake後に呼ばれるため、LoadConfigで読み込んだ設定が反映される。
+    /// </summary>
     void Start()
     {
-        // シリアルポートに接続し、データの読み取りを開始する
         ConnectToArduino();
     }
 
+    /// <summary>
+    /// 指定されたCOMポートへの接続を試み、成功時にデータ読み取り用スレッドを起動する。
+    /// 接続失敗時はIsConnectedがfalseのまま維持される。
+    /// </summary>
     private void ConnectToArduino()
     {
-        // 利用可能なポートをチェック（デバッグログ用）
         string[] availablePorts = SerialPort.GetPortNames();
         if (availablePorts.Length == 0)
         {
@@ -58,23 +74,19 @@ public class ArduinoInputManager : MonoBehaviour
         }
         Debug.Log("利用可能なポート: " + string.Join(", ", availablePorts));
 
-        // Inspectorで指定されたポート名が空かどうかチェック
         if (string.IsNullOrEmpty(fallbackPortName))
         {
             Debug.LogError("<color=red>Inspectorまたはconfig.txtで 'Fallback Port Name' が設定されていません！</color>");
             return;
         }
 
-        // --- メインの接続処理 ---
         Debug.Log($"<color=cyan>指定されたポート '{fallbackPortName}' への直接接続を試みます...</color>");
         try
         {
-            // 指定されたポートに、ハンドシェイクなしで直接接続する
             serialPort = new SerialPort(fallbackPortName, baudRate);
             serialPort.ReadTimeout = 1000;
             serialPort.Open();
 
-            // 接続成功
             isThreadRunning = true;
             readThread = new Thread(ReadSerialData);
             readThread.Start();
@@ -84,63 +96,59 @@ public class ArduinoInputManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            // 接続失敗
             Debug.LogError($"<color=red>FAILED:</color> '{fallbackPortName}' への接続に失敗しました。Error: {e.Message}");
             IsConnected = false;
         }
     }
 
-    // 別スレッドで実行されるデータ読み取りメソッド
+    /// <summary>
+    /// 別スレッドで実行され、Arduinoからのデータを継続的に読み取る。
+    /// 読み取った整数値をGripValueに格納する。タイムアウトは正常動作として扱う。
+    /// </summary>
     private void ReadSerialData()
     {
         while (isThreadRunning && serialPort != null && serialPort.IsOpen)
         {
             try
             {
-                // Arduinoから読み取った文字列を整数に変換できたら
                 if (int.TryParse(serialPort.ReadLine(), out int value))
                 {
-                    // 静的変数に値を格納するだけ。Unityの命令は一切呼ばない。
                     GripValue = value;
                 }
             }
             catch (TimeoutException)
             {
-                // データが来ていない場合はタイムアウトするが、正常な動作なので何もしない
+                // データ未受信時のタイムアウトは正常動作
             }
             catch (Exception)
             {
-                // ポートが閉じた時などにエラーが出るが、スレッド終了時には正常なので無視してOK
+                // ポート終了時のエラーは無視
             }
         }
     }
 
-    // config.txtからポート番号を読み込むメソッド
+    /// <summary>
+    /// ビルド後の実行ファイルと同階層にある config.txt からポート名を読み込み、
+    /// fallbackPortNameを上書きする。ファイルが存在しない場合はInspector設定値を使用する。
+    /// </summary>
     private void LoadConfig()
     {
-        // ビルドした.exeファイルと同じ階層にある "config.txt" のパスを取得
         string configPath = Path.Combine(Application.dataPath, "..", "config.txt");
-
         Debug.Log($"Searching for config file at: {configPath}");
 
-        // もし設定ファイルが存在すれば、その中身を読み取る
         if (File.Exists(configPath))
         {
             try
             {
-                // ファイルの各行を読み込む
                 string[] lines = File.ReadAllLines(configPath);
                 foreach (string line in lines)
                 {
-                    // "port_name=COM4" のような行を探す
                     if (line.StartsWith("port_name="))
                     {
-                        // "="の右側にある値（ポート名）を取得する
                         string portFromConfig = line.Split('=')[1].Trim();
-                        // Inspectorで設定された値を、ファイルから読み取った値で上書きする
                         fallbackPortName = portFromConfig;
                         Debug.Log($"<color=yellow>Config Loaded:</color> Fallback port set to '{fallbackPortName}' from config.txt");
-                        return; // 読み込めたので処理を終了
+                        return;
                     }
                 }
             }
@@ -155,13 +163,14 @@ public class ArduinoInputManager : MonoBehaviour
         }
     }
 
-
-    // ゲーム終了時に呼ばれる処理
+    /// <summary>
+    /// ゲーム終了時にスレッドを停止し、シリアルポートを安全に閉じる。
+    /// スレッド終了前にポートを閉じることで、ReadLineのブロッキングを解除する。
+    /// </summary>
     void OnDestroy()
     {
         isThreadRunning = false;
 
-        // スレッドが終了するのを待つ「前」に、シリアルポートを強制的に閉じる
         if (serialPort != null && serialPort.IsOpen)
         {
             try
@@ -175,7 +184,6 @@ public class ArduinoInputManager : MonoBehaviour
             }
         }
 
-        // スレッドが安全に終了したことを確認する
         if (readThread != null && readThread.IsAlive)
         {
             readThread.Join(100);

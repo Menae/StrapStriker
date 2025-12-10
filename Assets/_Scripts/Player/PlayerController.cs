@@ -2,9 +2,16 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>
+/// プレイヤーの状態管理とつり革アクション全般を制御するコントローラー。
+/// Joy-Con入力によるスイング、空中再掴み、発射、NPC衝突判定などを一元管理する。
+/// </summary>
 public class PlayerController : MonoBehaviour
 {
-    // ゲーム内でプレイヤーが取りうる状態を定義
+    /// <summary>
+    /// プレイヤーが取りうる状態を定義する列挙型。
+    /// 状態遷移によってスイング可否や物理挙動が切り替わる。
+    /// </summary>
     private enum PlayerState { Idle, Grabbing, Swaying, Launched }
 
     [Header("必須コンポーネント")]
@@ -26,8 +33,6 @@ public class PlayerController : MonoBehaviour
     public float directControlSmoothSpeed = 5f;
 
     [Header("アニメーション制御")]
-    // 画像の左端の状態が何度か、右端の状態が何度かを設定
-    // 左に60度傾いた状態から右に60度傾いた状態までのアニメーションなら 60 を設定
     [Tooltip("アニメーションの最大角度（片側）")]
     public float swayMaxAngle = 60f;
 
@@ -100,13 +105,19 @@ public class PlayerController : MonoBehaviour
     [Header("デバッグ設定")]
     [SerializeField] private bool debugMode = false;
 
-    private const float MinLaunchPower = 1f; // 発射に最低限必要なパワー
+    /// <summary>
+    /// 発射に最低限必要なパワー値。この値未満では発射処理が行われない。
+    /// </summary>
+    private const float MinLaunchPower = 1f;
 
-    private float gameStartTime = -1f; // ゲームがPlaying状態になった時刻
+    /// <summary>
+    /// ゲームがPlaying状態になった時刻を記録する変数。入力遅延の起点となる。
+    /// </summary>
+    private float gameStartTime = -1f;
+
     [Tooltip("ゲーム開始後、入力受付を開始するまでの無効時間（秒）")]
     public float inputDelayAfterStart = 0.5f;
 
-    // 内部変数
     private Rigidbody2D rb;
     private Animator playerAnim;
     private StageManager stageManager;
@@ -114,20 +125,50 @@ public class PlayerController : MonoBehaviour
     private List<Joycon> joycons;
     private Joycon joycon;
 
-    // Player State
+    /// <summary>
+    /// プレイヤーの現在の状態。Idle、Grabbing、Swaying、Launchedのいずれかを保持する。
+    /// </summary>
     private PlayerState currentState = PlayerState.Idle;
+
+    /// <summary>
+    /// スイングによって蓄積されるパワー値。発射時の力や衝突時の威力に影響する。
+    /// </summary>
     private float swayPower = 0f;
+
+    /// <summary>
+    /// 現在掴んでいるつり革への参照。nullの場合は未掴み状態。
+    /// </summary>
     private HangingStrap currentStrap = null;
-    private float lastFacingDirection = 1f; // 最後に見ていた向き(1=右, -1=左)
 
-    // Input Handling
+    /// <summary>
+    /// 最後に向いていた方向。1=右、-1=左。アニメーション制御とキャラクターの向きに使用される。
+    /// </summary>
+    private float lastFacingDirection = 1f;
+
+    /// <summary>
+    /// 前フレームでの入力状態。入力の立ち上がり・立ち下がり検出に使用する。
+    /// </summary>
     private bool wasGripInputActiveLastFrame = false;
-    private float lastYaw = 0f; // Joy-Conの前回のヨー角
-    private float timeSinceGripLow = 0f; // 握力が弱い状態が続いている時間
 
+    /// <summary>
+    /// Joy-Conの前回のヨー角。角速度の計算に使用される。
+    /// </summary>
+    private float lastYaw = 0f;
+
+    /// <summary>
+    /// 握力が弱い状態が続いている時間。猶予期間内なら掴み状態を維持する。
+    /// </summary>
+    private float timeSinceGripLow = 0f;
+
+    /// <summary>
+    /// GrabbingからSwayingへの移行を制御するコルーチン。掴みモーション中の離脱処理に使用される。
+    /// </summary>
     private Coroutine grabToSwayCoroutine;
 
-
+    /// <summary>
+    /// 初期化処理。Rigidbody2D、Animator、StageManager、Joy-Conの参照を取得する。
+    /// Animatorがない場合はエラーログを出力する。
+    /// </summary>
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -143,14 +184,12 @@ public class PlayerController : MonoBehaviour
             Debug.Log("<color=cyan>Animatorの参照取得に成功しました。</color>");
         }
 
-        // シーン内にあるStageManagerを探す
         stageManager = FindObjectOfType<StageManager>();
         if (stageManager == null)
         {
             Debug.LogError("シーン内にStageManagerが見つかりません！");
         }
 
-        // Joy-Conのセットアップ
         joycons = JoyconManager.instance.j;
         if (joycons.Count > 0)
         {
@@ -158,49 +197,43 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 毎フレームの入力処理と状態遷移を制御する。
+    /// ゲーム開始直後の入力遅延、握力の猶予期間、掴み・離しの判定を行う。
+    /// デバッグモードではキーボード入力によるアニメーショントリガーテストも可能。
+    /// </summary>
     void Update()
     {
-        // ゲームがプレイ中でない場合、タイマーをリセットして処理を抜ける
         if (stageManager != null && stageManager.CurrentState != StageManager.GameState.Playing)
         {
             gameStartTime = -1f;
             return;
         }
 
-        // ゲームがプレイ中になった瞬間を検知し、開始時刻を記録する
         if (gameStartTime < 0f)
         {
             gameStartTime = Time.time;
         }
 
-        // ゲーム開始からの経過時間が、設定した無効時間より短い場合は入力を無視する
         if (Time.time < gameStartTime + inputDelayAfterStart)
         {
-            // ただし、入力の記録だけは更新しておき、無効時間終了直後の誤作動を防ぐ
             wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
             return;
         }
 
-        // センサーやキーボードからの入力状態を読み取る
         bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
 
-        // 入力状態に基づいて、猶予タイマーを更新する
         if (isRawGripSignalActive)
         {
-            // 信号がONなら、タイマーをリセット
             timeSinceGripLow = 0f;
         }
         else
         {
-            // 信号がOFFなら、タイマーを進める
             timeSinceGripLow += Time.deltaTime;
         }
 
-        // 最終的な「掴んでいる」状態を決定する
-        // 信号がONか、または信号がOFFでも猶予期間内なら「掴んでいる」とみなす
         bool isGripInputActive = isRawGripSignalActive || (timeSinceGripLow < gripReleaseGracePeriod);
 
-        // 前フレームとの状態比較から「掴んだ瞬間」「離した瞬間」を判定する
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
 
@@ -225,7 +258,6 @@ public class PlayerController : MonoBehaviour
 
         wasGripInputActiveLastFrame = isGripInputActive;
 
-        // 接地判定を毎フレーム呼び出して、コンソールとSceneビューで確認する
         IsGrounded();
 
         if (Input.GetKeyDown(KeyCode.E))
@@ -249,16 +281,18 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 物理演算タイミングでの処理。スイング中の物理トルク計算、空中姿勢制御、着地処理を行う。
+    /// 直感操作モードでない場合はパワーの自然減衰も適用される。
+    /// </summary>
     void FixedUpdate()
     {
-        // 掴んでいる時だけスイングの物理処理を実行
         if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
         {
             ExecuteSwayingPhysics();
         }
         else if (currentState == PlayerState.Launched)
         {
-            // (中略...既存のLaunched処理はそのまま)
             if (IsGrounded())
             {
                 ChangeState(PlayerState.Idle);
@@ -278,7 +312,6 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // 直感操作モードONの時は、ExecuteSwayingPhysics内でpowerが上書きされるため減衰させない
         if (!useDirectControl)
         {
             float currentDecayRate = debugMode ? 0f : swayDecayRate;
@@ -286,6 +319,10 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// アニメーション更新処理。状態やスイング角度に応じてAnimatorパラメータを設定する。
+    /// キャラクターの向きもここで更新される。
+    /// </summary>
     private void LateUpdate()
     {
         if (playerAnim != null)
@@ -294,16 +331,11 @@ public class PlayerController : MonoBehaviour
 
             if (currentState == PlayerState.Swaying || currentState == PlayerState.Grabbing)
             {
-                // 1. 角度の取得
                 float currentAngle = transform.eulerAngles.z;
                 if (currentAngle > 180f) currentAngle -= 360f;
 
-                // 2. 基本の計算 (左向きの時はこれで正解)
-                // ※ もし左向きも逆になっている場合は、ここの引数を逆にしてください
                 float normalizedTime = Mathf.InverseLerp(swayMaxAngle, -swayMaxAngle, currentAngle);
 
-                // 右向きの補正
-                // 右を向いている場合(lastFacingDirectionが正)は、アニメーションの進行を反転させる
                 if (lastFacingDirection > 0)
                 {
                     normalizedTime = 1f - normalizedTime;
@@ -316,52 +348,58 @@ public class PlayerController : MonoBehaviour
         HandleDirection();
     }
 
+    /// <summary>
+    /// 状態遷移を実行する。デバッグモード時は遷移ログを出力する。
+    /// 同じ状態への遷移は無視される。
+    /// </summary>
+    /// <param name="newState">遷移先の状態</param>
     private void ChangeState(PlayerState newState)
-{
-    if (currentState == newState) return;
-
-    if (debugMode)
     {
-        Debug.Log($"<color=cyan>State Change:</color> {currentState} -> <color=yellow>{newState}</color>");
+        if (currentState == newState) return;
+
+        if (debugMode)
+        {
+            Debug.Log($"<color=cyan>State Change:</color> {currentState} -> <color=yellow>{newState}</color>");
+        }
+
+        currentState = newState;
     }
 
-    currentState = newState;
-}
-
+    /// <summary>
+    /// キャラクターの向きを速度に基づいて更新する。
+    /// つり革を掴んでいる間やLaunched状態では向きの更新を行わない。
+    /// 一定以上の速度がある場合のみ向きを変更し、Animatorパラメータに反映する。
+    /// </summary>
     private void HandleDirection()
     {
-        // 物理的につり革を掴んでいる間は、向きの更新処理を一切行わない
         if (currentStrap != null)
         {
             return;
         }
 
-        // Launched状態では、向きの更新を行わない
         if (currentState != PlayerState.Launched)
         {
-            // キャラクターの水平方向の速度を取得
             float horizontalVelocity = rb.velocity.x;
 
-            // わずかな動きは無視し、一定以上の速度が出ている時だけ向きを更新
             if (Mathf.Abs(horizontalVelocity) > 0.1f)
             {
-                // 速度の方向に応じて、向き(-1か1)を決定
                 lastFacingDirection = Mathf.Sign(horizontalVelocity);
             }
         }
 
-        // Animatorに現在の向きを伝える
         if (playerAnim != null)
         {
             playerAnim.SetFloat("Direction", lastFacingDirection);
         }
     }
 
+    /// <summary>
+    /// スイング中の物理演算を実行する。
+    /// 直感操作モードではJoy-Con角度に応じた直接的な回転制御を行い、
+    /// 通常モードではトルクベースの物理スイングと慣性効果を適用する。
+    /// </summary>
     private void ExecuteSwayingPhysics()
     {
-        // =================================================================
-        // 直感操作モード
-        // =================================================================
         if (useDirectControl)
         {
             if (joycon == null && !debugMode) return;
@@ -370,69 +408,45 @@ public class PlayerController : MonoBehaviour
 
             if (debugMode)
             {
-                // デバッグモード: キーボード入力 (-1 ~ 1)
                 inputRatio = Input.GetAxisRaw("Horizontal");
             }
             else
             {
-                // Joy-Conの仕様上、ケーブル側(下)を180度とし、そこからの差分を取る
                 Quaternion orientation = joycon.GetVector();
                 float currentYaw = orientation.eulerAngles.y;
 
-                // 180度を基準とした角度差分を取得 (-180 ~ 180)
                 float angleDifference = Mathf.DeltaAngle(180f, currentYaw);
 
-                // 設定した範囲(directControlInputRange)で割って -1 ~ 1 に正規化
-                // rangeが90の場合、90度傾けると1.0(MAX)になる
-                // rangeを大きくする(120など)と、より大きく傾けないとMAXにならず、感度が下がる
                 inputRatio = Mathf.Clamp(angleDifference / directControlInputRange, -1f, 1f);
             }
 
-            // 反転フラグがONなら入力を逆にする
             if (invertDirectControl)
             {
                 inputRatio *= -1f;
             }
 
-            // 1. 目標角度の計算
-            // inputRatio (-1 ~ 1) に 最大角度(swayMaxAngle) を掛ける
-            // Unityの2D回転は「左回転(反時計回り)がプラス」。
-            // 右に入力(+1)した時、キャラは右(時計回り、マイナス角)に行ってほしいのでマイナスを掛ける。
             float targetAngle = -inputRatio * swayMaxAngle;
 
-            // 2. 現在の角度から目標角度へスムーズに回転させる
             float currentZ = transform.eulerAngles.z;
-            if (currentZ > 180f) currentZ -= 360f; // -180~180表現に変換
+            if (currentZ > 180f) currentZ -= 360f;
 
-            // Lerpで補間移動。Speedの値で追従性を調整
             float newZ = Mathf.Lerp(currentZ, targetAngle, Time.fixedDeltaTime * directControlSmoothSpeed);
             rb.MoveRotation(newZ);
 
-            // 3. 物理挙動の干渉を防ぐ（慣性で揺れ戻しが起きないようにする）
             rb.angularVelocity = 0f;
 
-            // 4. パワーの自動計算
-            // 直感操作モードでは「振って溜める」ことができないため、
-            // 「傾きが大きい＝パワーが溜まっている」とみなして発射力を確保する
             float anglePowerRatio = Mathf.Abs(newZ) / swayMaxAngle;
             swayPower = anglePowerRatio * maxSwayPower;
 
-            // 物理モードの処理は行わずに終了
             return;
         }
 
-        // =================================================================
-        // 通常モード: 物理演算によるスイング
-        // =================================================================
-
         float inputTorque = 0f;
 
-        // --- 1. プレイヤー入力によるトルクの計算 ---
         if (debugMode)
         {
             float horizontalInput = Input.GetAxisRaw("Horizontal");
 
-            // キー入力がある場合のみ処理
             if (Mathf.Abs(horizontalInput) > 0.1f)
             {
                 ChangeState(PlayerState.Swaying);
@@ -444,7 +458,7 @@ public class PlayerController : MonoBehaviour
                 inputTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
         }
-        else // Joy-Con操作
+        else
         {
             if (joycon == null) return;
 
@@ -484,14 +498,12 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // --- 2. 慣性によるトルクの計算 ---
         float inertiaTorque = 0f;
         if (StageManager.CurrentInertia.x != 0)
         {
             inertiaTorque = StageManager.CurrentInertia.x * inertiaSwingBonus;
         }
 
-        // --- 3. 合算して適用 ---
         float totalTorque = inputTorque + inertiaTorque;
 
         if (Mathf.Abs(totalTorque) > 0.01f)
@@ -500,12 +512,19 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // アイドル時の移動不可
+    /// <summary>
+    /// Idle状態での移動処理（現在は未実装）。将来的な拡張用のプレースホルダー。
+    /// </summary>
     private void ExecuteIdleMovement()
     {
-        // 何もしない
     }
 
+    /// <summary>
+    /// 最も近いつり革を検索して掴む処理。
+    /// 地上から掴む場合はGrabbing状態からSwaying状態へ遷移するコルーチンを開始し、
+    /// 空中再掴みの場合は速度を減衰させて即座にSwaying状態へ移行する。
+    /// HingeJoint2Dを生成してつり革との物理的な接続を確立する。
+    /// </summary>
     private void GrabNearestStrap()
     {
         HangingStrap nearestStrap = HangingStrapManager.FindNearestStrap(transform.position, maxGrabDistance);
@@ -547,21 +566,24 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// つり革を離す処理。状態に応じて発射・落下・Idle状態への遷移を制御する。
+    /// Grabbing状態では単純に離してIdle状態へ移行し、
+    /// Swaying状態では蓄積パワーに応じて発射するか落下するかを判定する。
+    /// 発射時は速度方向への推力を加え、向きを確定させる。
+    /// </summary>
     private void ReleaseStrap()
     {
-        // 掴み->スイング移行中のコルーチンが動いていれば止める
         if (grabToSwayCoroutine != null)
         {
             StopCoroutine(grabToSwayCoroutine);
             grabToSwayCoroutine = null;
         }
 
-        // 物理的な接続を解除 (共通処理)
         Destroy(activeHingeJoint);
         activeHingeJoint = null;
         currentStrap = null;
 
-        // 状態に応じた処理
         switch (currentState)
         {
             case PlayerState.Grabbing:
@@ -570,41 +592,33 @@ public class PlayerController : MonoBehaviour
                 break;
 
             case PlayerState.Swaying:
-                // パワーが不十分な場合
                 if (swayPower < MinLaunchPower)
                 {
-                    // ただし、空中にいる場合は落下中も姿勢を制御させたいのでLaunched状態にする
                     if (!IsGrounded())
                     {
                         ChangeState(PlayerState.Launched);
                     }
-                    // 地面にいる場合は、そのままIdle状態になる
                     else
                     {
                         ChangeState(PlayerState.Idle);
                     }
 
                     swayPower = 0f;
-                    return; // 発射処理は行わずに終了
+                    return;
                 }
 
-                // パワーが十分なら発射
                 Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");
                 ChangeState(PlayerState.Launched);
                 rb.constraints = RigidbodyConstraints2D.None;
 
-                // 発射前にスイングの回転をリセットし、体勢を安定させる
                 rb.angularVelocity = 0f;
 
                 Vector2 currentVelocity = rb.velocity.normalized;
                 if (currentVelocity.sqrMagnitude < 0.1f) { currentVelocity = Vector2.up; }
 
-                // 発射の向きから、着地するまでのキャラクターの向きを決定する
                 lastFacingDirection = Mathf.Sign(currentVelocity.x);
-                // もし真上に飛んだなどで水平方向の向きがない場合は、以前の向きを維持する
                 if (Mathf.Abs(currentVelocity.x) < 0.01f)
                 {
-                    // lastFacingDirection は以前の値のまま
                 }
 
                 Vector2 launchBoost = currentVelocity * swayPower * launchMultiplier;
@@ -615,21 +629,27 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Grabbing状態からSwaying状態への遷移を制御するコルーチン。
+    /// 掴みアニメーションの再生時間分待機してから状態を切り替える。
+    /// 待機中に離脱した場合は遷移をキャンセルする。
+    /// </summary>
     private IEnumerator TransitionToSwayingRoutine()
     {
-        // アニメーションの再生が終わる想定時間まで待機
         yield return new WaitForSeconds(grabToSwayTransitionTime);
 
-        // 待機後もまだ掴み状態(Grabbing)が継続している場合のみ、Swayingに移行する
-        // (待っている間にプレイヤーが掴むのをやめたケースに対応)
         if (currentState == PlayerState.Grabbing)
         {
             ChangeState(PlayerState.Swaying);
         }
-        // コルーチン自身の参照をクリア
         grabToSwayCoroutine = null;
     }
 
+    /// <summary>
+    /// NPCとの衝突時に呼び出される。
+    /// スイング中の場合はSwayPowerを威力に加算してNPCに衝突威力を伝達する。
+    /// </summary>
+    /// <param name="other">衝突したNPCのCollider2D</param>
     public void HandleNpcCollision(Collider2D other)
     {
         if (other.gameObject.CompareTag("NPC"))
@@ -638,10 +658,8 @@ public class PlayerController : MonoBehaviour
 
             if (npc != null)
             {
-                // 威力の計算用に、まず現在の速度をベースとする
                 Vector2 impactVelocity = rb.velocity;
 
-                // もしスイング中なら、SwayPowerを威力に加算する（この部分は維持）
                 if (currentState == PlayerState.Swaying)
                 {
                     Vector2 powerBonus = impactVelocity.normalized * swayPower * swayImpactPowerBonus;
@@ -649,27 +667,28 @@ public class PlayerController : MonoBehaviour
                     Debug.Log($"<color=red>スイングインパクト！</color> パワーボーナス: {powerBonus.magnitude}");
                 }
 
-                // 最終的に計算された威力でNPCにインパクトを与える
                 npc.TakeImpact(impactVelocity, knockbackMultiplier);
             }
         }
     }
 
+    /// <summary>
+    /// 接地判定を行う。feetPositionから下方向へレイキャストを飛ばし、groundLayerに該当する地面を検出する。
+    /// Sceneビューでレイを可視化し、ヒット時は緑、ミス時は赤で描画される。
+    /// </summary>
+    /// <returns>地面に接地している場合はtrue、空中の場合はfalse</returns>
     private bool IsGrounded()
     {
         RaycastHit2D hit = Physics2D.Raycast(feetPosition.position, Vector2.down, groundCheckDistance, groundLayer);
 
-        // Sceneビューにレイを可視化する（緑 = ヒット, 赤 = ミス）
         Color rayColor = hit ? Color.green : Color.red;
         Debug.DrawRay(feetPosition.position, Vector2.down * groundCheckDistance, rayColor);
 
         if (hit.collider != null)
         {
-            //Debug.Log($"<color=green>IsGrounded SUCCESS:</color> レイがオブジェクト「{hit.collider.name}」（レイヤー: {LayerMask.LayerToName(hit.collider.gameObject.layer)}）にヒットしました。IsGroundedは true を返します。");
         }
         else
         {
-            //Debug.Log($"<color=red>IsGrounded FAILURE:</color> レイは地面を検知しませんでした。IsGroundedは false を返します。");
         }
 
         return hit.collider != null;
