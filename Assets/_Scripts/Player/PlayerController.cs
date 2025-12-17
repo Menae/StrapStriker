@@ -19,8 +19,9 @@ public class PlayerController : MonoBehaviour
     public Transform handPoint;
 
     [Header("入力設定")]
-    [Tooltip("この値以上の握力でつり革を掴みます")]
-    public int gripThreshold = 500;
+    [Tooltip("キャリブレーションされた範囲に対して、何%の信号強度で「掴んだ」とみなすか (0.5 = 50%)")]
+    [Range(0.1f, 0.9f)]
+    public float gripNormalizedThreshold = 0.5f;
 
     [Header("テスト機能: 直感操作モード")]
     [Tooltip("ONにすると物理挙動を無視してJoy-Conの角度とキャラクターの角度を完全同期させる")]
@@ -105,6 +106,23 @@ public class PlayerController : MonoBehaviour
     [Header("デバッグ設定")]
     [SerializeField] private bool debugMode = false;
 
+    // --- キャリブレーション用内部変数 ---
+    /// <summary>
+    /// 離している時のセンサー値（最小値/ベースライン）。
+    /// </summary>
+    private float calibrationMin = 0f;
+
+    /// <summary>
+    /// 握っている時のセンサー値（最大値/アクティブ）。
+    /// </summary>
+    private float calibrationMax = 1000f;
+
+    /// <summary>
+    /// キャリブレーション値が設定済みかどうか。
+    /// これがfalseの間は入力を受け付けません。
+    /// </summary>
+    private bool isCalibrated = false;
+
     /// <summary>
     /// 発射に最低限必要なパワー値。この値未満では発射処理が行われない。
     /// </summary>
@@ -166,22 +184,19 @@ public class PlayerController : MonoBehaviour
     private Coroutine grabToSwayCoroutine;
 
     /// <summary>
-    /// 初期化処理。Rigidbody2D、Animator、StageManager、Joy-Conの参照を取得する。
-    /// Animatorがない場合はエラーログを出力する。
+    /// 初期化処理。コンポーネントの参照を取得する。
+    /// 以前のPlayerPrefs読み込み処理は削除し、SessionCalibrationからの注入を待つ設計に変更。
     /// </summary>
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
+        // 空中での意図しない回転を防ぐ
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-        playerAnim = GetComponentInChildren<Animator>();
 
+        playerAnim = GetComponentInChildren<Animator>();
         if (playerAnim == null)
         {
-            Debug.LogError("Playerの子オブジェクトにAnimatorが見つかりません！ playerAnimがnullです。");
-        }
-        else
-        {
-            Debug.Log("<color=cyan>Animatorの参照取得に成功しました。</color>");
+            Debug.LogError("Playerの子オブジェクトにAnimatorが見つかりません！");
         }
 
         stageManager = FindObjectOfType<StageManager>();
@@ -190,38 +205,62 @@ public class PlayerController : MonoBehaviour
             Debug.LogError("シーン内にStageManagerが見つかりません！");
         }
 
-        joycons = JoyconManager.instance.j;
-        if (joycons.Count > 0)
+        // JoyconManagerの初期化タイミングによってはnullの可能性があるためチェック
+        if (JoyconManager.instance != null)
         {
-            joycon = joycons[0];
+            joycons = JoyconManager.instance.j;
+            if (joycons != null && joycons.Count > 0)
+            {
+                joycon = joycons[0];
+            }
         }
     }
 
     /// <summary>
-    /// 毎フレームの入力処理と状態遷移を制御する。
-    /// ゲーム開始直後の入力遅延、握力の猶予期間、掴み・離しの判定を行う。
-    /// デバッグモードではキーボード入力によるアニメーショントリガーテストも可能。
+    /// 毎フレームの更新処理。入力判定と状態遷移を行う。
+    /// キャリブレーション未完了時は入力を無視する。
     /// </summary>
     void Update()
     {
-        if (stageManager != null && stageManager.CurrentState != StageManager.GameState.Playing)
+        // キャリブレーションがまだ完了していない、またはゲーム中でない場合は処理しない
+        if (!isCalibrated || (stageManager != null && stageManager.CurrentState != StageManager.GameState.Playing))
         {
             gameStartTime = -1f;
             return;
         }
 
+        // ゲーム開始時刻の記録（入力遅延用）
         if (gameStartTime < 0f)
         {
             gameStartTime = Time.time;
         }
 
+        // ゲーム開始直後の誤動作防止（入力遅延）
         if (Time.time < gameStartTime + inputDelayAfterStart)
         {
-            wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
+            // 遅延中も前フレームの状態としては更新しておく
+            float current = (ArduinoInputManager.instance != null) ? ArduinoInputManager.instance.SmoothedGripValue : 0f;
+            float norm = Mathf.InverseLerp(calibrationMin, calibrationMax, current);
+            wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || (norm > gripNormalizedThreshold);
             return;
         }
 
-        bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || (ArduinoInputManager.GripValue > gripThreshold);
+        // --- 握力（接触）判定ロジック ---
+
+        // 1. ArduinoInputManagerから平滑化された現在値を取得
+        float currentGrip = (ArduinoInputManager.instance != null) ? ArduinoInputManager.instance.SmoothedGripValue : 0f;
+
+        // 2. キャリブレーション範囲に基づいて 0.0～1.0 に正規化
+        // InverseLerpは min > max の場合でも適切に補間比率を計算してくれる
+        float normalizedGrip = Mathf.InverseLerp(calibrationMin, calibrationMax, currentGrip);
+
+        // 3. 閾値判定
+        bool isSensorActive = normalizedGrip > gripNormalizedThreshold;
+
+        // Spaceキー(デバッグ用) または センサー判定
+        bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || isSensorActive;
+
+        // --- チャタリング（瞬間的な信号切れ）対策 ---
 
         if (isRawGripSignalActive)
         {
@@ -232,11 +271,14 @@ public class PlayerController : MonoBehaviour
             timeSinceGripLow += Time.deltaTime;
         }
 
+        // 猶予期間内なら、信号が切れても「掴み状態」を維持する
         bool isGripInputActive = isRawGripSignalActive || (timeSinceGripLow < gripReleaseGracePeriod);
 
+        // 入力の立ち上がり・立ち下がり検出
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
 
+        // 状態に応じたアクション実行
         switch (currentState)
         {
             case PlayerState.Idle:
@@ -258,26 +300,17 @@ public class PlayerController : MonoBehaviour
 
         wasGripInputActiveLastFrame = isGripInputActive;
 
+        // 接地判定（Raycast可視化含む）
         IsGrounded();
 
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            playerAnim.SetTrigger("Jump");
-        }
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            playerAnim.SetTrigger("Kick");
-        }
+        // --- デバッグ用コマンド ---
+        if (Input.GetKeyDown(KeyCode.E)) playerAnim.SetTrigger("Jump");
+        if (Input.GetKeyDown(KeyCode.R)) playerAnim.SetTrigger("Kick");
+
         if (debugMode)
         {
-            if (Input.GetKey(KeyCode.LeftArrow))
-            {
-                rb.velocity = Vector2.left * 5f;
-            }
-            if (Input.GetKey(KeyCode.RightArrow))
-            {
-                rb.velocity = Vector2.right * 5f;
-            }
+            if (Input.GetKey(KeyCode.LeftArrow)) rb.velocity = Vector2.left * 5f;
+            if (Input.GetKey(KeyCode.RightArrow)) rb.velocity = Vector2.right * 5f;
         }
     }
 
@@ -346,6 +379,22 @@ public class PlayerController : MonoBehaviour
         }
 
         HandleDirection();
+    }
+
+    /// <summary>
+    /// 外部（SessionCalibrationクラス）からキャリブレーション結果を注入するためのメソッド。
+    /// このメソッドが呼ばれることで isCalibrated が true になり、操作が可能になる。
+    /// </summary>
+    /// <param name="minGrip">離している状態（OFF）の計測値</param>
+    /// <param name="maxGrip">握っている状態（ON）の計測値</param>
+    public void SetCalibrationValues(float minGrip, float maxGrip)
+    {
+        this.calibrationMin = minGrip;
+        this.calibrationMax = maxGrip;
+        this.isCalibrated = true;
+
+        // デバッグログで注入された値を確認
+        Debug.Log($"<color=cyan>Calibration Applied:</color> OFF(Min)={minGrip:F1}, ON(Max)={maxGrip:F1}");
     }
 
     /// <summary>

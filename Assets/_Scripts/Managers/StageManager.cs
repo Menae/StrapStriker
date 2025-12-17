@@ -169,13 +169,15 @@ public class StageManager : MonoBehaviour
 
     /// <summary>
     /// Startで実行される初期化処理。
-    /// ゲーム状態をチュートリアルに設定し、各UI要素を初期化する。
-    /// TimeScaleを0にしてゲームを一時停止状態でスタートする。
+    /// 【修正版】いきなりチュートリアルは出さず、UIの非表示初期化と変数のセットアップだけ行う。
+    /// キャリブレーションが動くよう、TimeScaleは1にしておく。
     /// </summary>
     void Start()
     {
-        CurrentState = GameState.Tutorial;
-        if (tutorialPanel != null) tutorialPanel.SetActive(true);
+        // まだチュートリアル状態にはしない（キャリブレーション待ち）
+
+        // 全パネルを一旦非表示
+        if (tutorialPanel != null) tutorialPanel.SetActive(false); // ← falseに変更
         if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
         if (clearPanel != null) clearPanel.SetActive(false);
@@ -184,11 +186,27 @@ public class StageManager : MonoBehaviour
 
         if (stationNameText != null) stationNameText.text = "";
         CurrentInertia = Vector2.zero;
-        Time.timeScale = 0f;
+
+        // キャリブレーションのコルーチンを動かすために、時間は動かしておく
+        Time.timeScale = 1f;
+
         UpdateCongestionUI();
 
         defeatedNpcCount = 0;
         UpdateDefeatedNpcCountUI();
+    }
+
+    /// <summary>
+    /// キャリブレーション完了後に呼ばれる。
+    /// チュートリアルを表示し、ゲーム時間を止めてプレイヤーの開始入力を待つ。
+    /// </summary>
+    public void ShowTutorial()
+    {
+        CurrentState = GameState.Tutorial;
+        if (tutorialPanel != null) tutorialPanel.SetActive(true);
+
+        // ここで初めて時間を止める（プレイヤーに説明を読ませるため）
+        Time.timeScale = 0f;
     }
 
     /// <summary>
