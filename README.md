@@ -20,6 +20,9 @@
 ![Image](Docs/2025-12-1116-59-19-ezgif.com-video-to-gif-converter.gif)
 > 車両内のNPCたちをぶっ飛ばすシーン
 
+![Image](Docs/StrapStrikerPlayClip-ezgif.com-video-to-gif-converter.gif)
+> 実際の筐体の様子
+
 ### プレイ動画 (YouTube)
 https://youtu.be/abLYPbKq8iE
 
