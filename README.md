@@ -20,59 +20,72 @@
 ![Image](Docs/2025-12-1116-59-19-ezgif.com-video-to-gif-converter.gif)
 > 車両内のNPCたちをぶっ飛ばすシーン
 
+![Image](Docs/StrapStrikerPlayClip-ezgif.com-video-to-gif-converter.gif)
+> 実際の筐体の様子
+
 ### プレイ動画 (YouTube)
 https://youtu.be/abLYPbKq8iE
 
 ## 💻 技術的なこだわり
 
-### 1. 実機筐体と連携する入力基盤（Arduino × Joy-Con）
-Arduino製握力センサーとSwitchのJoy-Conを組み合わせ、**実際のつり革の動きがそのままゲーム入力になる仕組み**を実装しました。
-Arduinoやつり革のコントローラーが無くても、ジョイコンとキーボードさえあればどこでも遊ぶことができます。
+### 1. 堅牢な非同期シリアル通信基盤 (ArduinoInputManager)
+Unityのメインスレッドを阻害しないよう設計された、独自コントローラーとの通信管理クラスです。
+**「展示会でのトラブルゼロ」と「パフォーマンスの維持」**を念頭に置いてに設計しており、ハードウェア環境が不安定な状況でもゲームプレイを止めない工夫を凝らしています。
 
-* シリアル通信を別スレッド化し、握力データをリアルタイムかつ安定的に取得  
-* Joy-Conの角度・角速度からスイング用パワー `swayPower` を算出し、「どれだけ振ったか」がそのまま飛距離や威力に反映される設計  
-* 握力入力には「一瞬だけ0になっても掴みを維持する」猶予時間を入れて、実機でも遊びやすく調整しています  
-  * **Core Logic:** [📄 ArduinoInputManager.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Managers/ArduinoInputManager.cs)  
-  * **Player Input:** [📄 PlayerController.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Player/PlayerController.cs)
-
----
-
-### 2. プランナー主導で調整できるデータ駆動ステージ
-ステージ進行をデータ構造とコルーチンで整理し、**Inspectorからパラメータを触るだけで演出と難易度を調整できる**ようにしています。
-
-* 駅ごとの到着時間・NPC数・駅名・背景を `StationEvent` としてシリアライズ  
-* 「減速 → 停車 → ドア開閉 → NPCスポーン → 加速 → 次の駅」をコルーチンで制御し、数値を変えるだけでテンポを変更可能  
-* プランナーを調整内容を鑑みて、重要な項目を順次パラメータ化していきました  
-  * **Stage Flow:** [📄 StageManager.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Managers/StageManager.cs)
+* **受信処理のマルチスレッド化**
+  ブロッキングが発生するシリアル通信処理を別スレッドに分離し、メインスレッドへの負荷を完全に排除。`volatile`修飾子によるメモリ可視性の保証を行い、スレッドセーフかつ高速なデータの受け渡しを実現しています。
+* **「手触り」を向上させる信号処理フィルタ**
+  ハードウェア特有のスパイクノイズを除去するため、線形補間（`Mathf.Lerp`）によるスムージング処理を実装。生データをそのまま使うのではなく、ゲームの手触りとして「気持ち良い」挙動になるよう、プログラム側で入力を正規化しています。
+* **実運用を想定した外部コンフィグ機能**
+  展示会場でのPC変更やポート番号の変動に即座に対応できるよう、再ビルド不要で設定変更可能な外部テキストファイル読み込み機能を実装。ファイル自動生成機能も備え、設営時のセットアップ時間を大幅に短縮しました。
+  * **Arduinoの入力を処理するスクリプト:** [📄 ArduinoInputManager.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Managers/ArduinoInputManager.cs)  
 
 ---
 
-### 3. 列車の慣性とプレイヤー挙動をリンクさせたゲーム体験
-列車の加減速を共有ベクトル `CurrentInertia` として管理し、**ステージ演出とプレイヤー操作感が連動するような物理演出**を行っています。
+### 2. 物理演算とセンサー融合による「体感」の再現 (PlayerController)
+Joy-Conのジャイロセンサー（角度・角速度）とArduinoの圧力センサー（握力）を統合し、**「つり革の振りがそのまま物理エネルギーに変換される」**コアメカニクスを実装しました。
+物理演算ならではの挙動の納得感と、ゲームとしての遊びやすさのバランス調整に注力しています。
 
-* `StageManager` が列車の慣性を更新し、`PlayerController` がスイングトルクに加算  
-* 「電車が揺れるほどスイングしやすくなる」など、世界観と操作感が一体化する表現を狙いました  
-  * **Inertia Link:**  
-    * [📄 StageManager.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Managers/StageManager.cs)  
-    * [📄 PlayerController.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Player/PlayerController.cs)
+* **物理ベースの「スイング」挙動実装**
+  単純なアニメーション再生ではなく、Rigidbody2Dへのトルク（`AddTorque`）入力によって振り子運動を制御。Joy-Conを振るタイミングと角度が合った時のみ運動エネルギー（`swayPower`）が増幅されるロジックを組み、「上手く漕げた時の加速感」をより感じられるように心がけました。
+* **センサーノイズを吸収するUX設計（コヨーテタイム）**
+  自作デバイス特有の「一瞬の信号途切れ」による意図しない入力を防ぐため、入力信号が0になっても数フレーム間は判定を維持する「猶予期間」を実装。ハードウェアの不安定さをソフトウェア側で吸収し、ストレスのない操作性を実現しています。
+* **ステートマシンによる物理制約の動的管理**
+  「掴み（HingeJoint接続）」「空中移動（慣性移動）」「着地（摩擦制御）」といった異なる物理状態をステートマシンで厳格に管理。状態遷移に合わせてRigidbodyの制約を動的に切り替えることで、バグの起きにくい堅牢な挙動制御を行っています。
+  * **Playerの挙動を担当するスクリプト:** [📄 PlayerController.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Player/PlayerController.cs)
 
 ---
 
-### 4. Inspectorフレンドリーなパラメータ設計
-共同制作を意識し、「何をいじると何が変わるか」が分かる Inspectorを徹底しています。
+### 3. データ駆動型の進行管理と物理連動 (StageManager)
+ゲームの進行を時系列で管理し、環境変化を物理エンジン全体へ伝播させる司令塔クラスです。
+開発効率と演出の整合性を重視した設計を行っています。
 
-* `[Header]`・`[Tooltip]`・`[Range]` を活用し、スイング・発射・ノックバック・混雑率・駅タイミングなどを可視化  
-* コードを書かないメンバーでも、その場で手触りや難易度を試せるようにすることを意識して設計しました  
-  * **Parameter-rich Scripts:**  
-    * [📄 StageManager.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Managers/StageManager.cs)  
-    * [📄 PlayerController.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Player/PlayerController.cs)
+* **Inspector完結のレベルデザイン基盤**
+  駅のパラメータ（到着時間、駅の数、敵出現数、背景画像）を構造体として定義し、リスト化して管理。コードを修正することなく、Inspector上でステージ構成や難易度曲線を直感的に調整できる「データ駆動」な設計を採用し、バランス調整のサイクルを高速化しました。
+* **コルーチンによるシーケンス制御**
+  「減速→停車→ドア開閉→敵スポーン→加速」という複雑な時系列イベントを、`Update`メソッドでのフラグ管理ではなくコルーチン（`IEnumerator`）で記述。非同期的なイベントの流れを可読性の高いコードで管理し、演出のタイミング調整を容易にしています。
+* **環境変化（慣性）のグローバル展開**
+  電車の「加速・減速」を単なるUI演出で終わらせず、物理ベクトル（`CurrentInertia`）として数値化し、グローバルに公開。プレイヤーや敵キャラクターのコントローラーがこの値を参照することで、「急ブレーキで体がよろめく」といった物理挙動をシステム全体で同期させています。
+    * **ステージの構成を担当するスクリプト: **[📄 StageManager.cs](https://github.com/Menae/StrapStriker/blob/main/Assets/_Scripts/Managers/StageManager.cs)  
 
 ## 🔧 使用技術・環境
 * **Engine:** Unity 2022.3.18f1
-* **Language:** C#
+* **Language:** C#, C++ (Arduino)
 * **IDE:** Visual Studio 2022
 * **Tools:** Git, GitHub
 
 ## 🚀 インストール・遊び方
-1. 右側の「Releases」から `StrapStriker_v0.66` をダウンロードしてください。
-2. 解凍し、`StrapStriker_v0.66` を起動するとプレイできます。
+
+**【動作環境】**
+* **OS:** Windows 10 / 11
+* **必須デバイス:** 自作つり革コントローラー (Arduino) + Joy-Con
+
+**⚠️ ビルド済みアプリ（Releases）について**
+配布している `StrapStriker_v0.66` は特殊筐体でのプレイを前提としたビルドのため、**コントローラーを接続しない環境では正常に動作しません。**
+
+**【PCのみで動作確認を行う場合】**
+特殊コントローラーなしでゲームロジックや動作を確認されたい場合は、リポジトリをクローンした上で、Scenesフォルダ内のSceen1を開き、ヒエラルキーからCharacters->Playerのインスペクタから最下部のDebug Modeをにチェックを入れることで、A/Dキー + スペースでの操作可能がなります。
+
+1. 本リポジトリを `Clone` または `Download ZIP` してください。
+2. **Unity 2022.3.18f1** でプロジェクトを開きます。
+    * ※本来の「つり革を振る」体験とは異なりますが、ゲーム進行やロジックの確認が可能です。
