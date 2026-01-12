@@ -5,8 +5,7 @@ using System.Collections;
 
 /// <summary>
 /// プレイ開始ごとにセンサーのキャリブレーションを実行するクラス。
-/// プレイヤーごとの握力や皮膚抵抗の個人差、環境によるノイズを吸収するため、
-/// ゲーム開始直前に「握った状態」と「離した状態」の信号値を計測し、
+/// 2本の銅箔テープ（センサー1, センサー2）それぞれの「握った状態」と「離した状態」を計測し、
 /// そのセッション専用の閾値を設定する。
 /// </summary>
 public class SessionCalibration : MonoBehaviour
@@ -32,10 +31,10 @@ public class SessionCalibration : MonoBehaviour
     [Tooltip("判定を確定させるために、状態を維持しなければならない時間（秒）")]
     public float measureDuration = 2.0f;
 
-    [Tooltip("「握っている」と判定する信号値の閾値。この値を上回り続ける必要がある。")]
+    [Tooltip("「握っている」と判定する信号値の閾値。両方のセンサーがこの値を上回り続ける必要がある。")]
     public float waitOnThreshold = 1000f;
 
-    [Tooltip("「離している」と判定する信号値の閾値。この値を下回り続ける必要がある。")]
+    [Tooltip("「離している」と判定する信号値の閾値。両方のセンサーがこの値を下回り続ける必要がある。")]
     public float waitOffThreshold = 500f;
 
     [Header("デバッグ設定")]
@@ -53,32 +52,27 @@ public class SessionCalibration : MonoBehaviour
     /// <summary>
     /// 毎フレーム更新処理。
     /// 信号値をスライダーに反映し、入力状況を視覚的に確認可能にする。
+    /// UI用には2つのセンサーの平均値を表示する。
     /// </summary>
     private void Update()
     {
         if (signalSlider != null)
         {
-            signalSlider.value = GetCurrentValue();
+            signalSlider.value = GetAverageCurrentValue();
         }
     }
 
     /// <summary>
-    /// 現在のセンサー値を取得する。
-    /// デバッグ用にスペースキー入力でのオーバーライド処理を含む。
+    /// 現在のセンサー値（2つのセンサーの平均）を取得する。
+    /// UI表示用。
     /// </summary>
-    /// <returns>平滑化されたセンサー値、またはデバッグ用の仮想値</returns>
-    private float GetCurrentValue()
+    private float GetAverageCurrentValue()
     {
-        // デバッグ入力: スペースキー押下時は最大値を返す
-        if (Input.GetKey(KeyCode.Space))
-        {
-            return debugVirtualValue;
-        }
+        if (Input.GetKey(KeyCode.Space)) return debugVirtualValue;
 
-        // 本番入力: ArduinoInputManagerから値を取得
         if (ArduinoInputManager.instance != null)
         {
-            return ArduinoInputManager.instance.SmoothedGripValue;
+            return (ArduinoInputManager.instance.SmoothedGripValue1 + ArduinoInputManager.instance.SmoothedGripValue2) / 2f;
         }
 
         return 0f;
@@ -86,8 +80,7 @@ public class SessionCalibration : MonoBehaviour
 
     /// <summary>
     /// キャリブレーションのメインフロー制御。
-    /// 「握る（ON）」と「離す（OFF）」の各状態を指定時間維持させ、その平均値を計測する。
-    /// 途中で状態が解除された場合は計測をリセットし、確実な入力を保証する。
+    /// 2つのセンサー両方について計測を行う。
     /// </summary>
     private IEnumerator CalibrationSequence()
     {
@@ -95,7 +88,7 @@ public class SessionCalibration : MonoBehaviour
         if (overlayPanel != null) overlayPanel.SetActive(true);
 
         float timer;
-        float sum;
+        float sum1, sum2;
         int count;
 
         // =================================================================
@@ -103,41 +96,53 @@ public class SessionCalibration : MonoBehaviour
         // =================================================================
 
         timer = 0f;
-        sum = 0f;
+        sum1 = 0f;
+        sum2 = 0f;
         count = 0;
 
-        // 指定時間を満了するまでループし、継続的な入力を監視する
         while (timer < measureDuration)
         {
-            float currentVal = GetCurrentValue();
+            // 現在値の取得（Arduino未接続時は0またはデバッグ値）
+            float val1 = 0f;
+            float val2 = 0f;
 
-            // 信号値が閾値を超えているか判定
-            if (currentVal >= waitOnThreshold)
+            if (Input.GetKey(KeyCode.Space))
             {
-                // 条件を満たしている場合、計測を進める
+                val1 = debugVirtualValue;
+                val2 = debugVirtualValue;
+            }
+            else if (ArduinoInputManager.instance != null)
+            {
+                val1 = ArduinoInputManager.instance.SmoothedGripValue1;
+                val2 = ArduinoInputManager.instance.SmoothedGripValue2;
+            }
+
+            // 両方のセンサーが閾値を超えているか判定
+            if (val1 >= waitOnThreshold && val2 >= waitOnThreshold)
+            {
                 timer += Time.deltaTime;
-                sum += currentVal;
+                sum1 += val1;
+                sum2 += val2;
                 count++;
 
-                // ユーザーに進捗状況を提示
                 float remainingTime = Mathf.Max(0f, measureDuration - timer);
                 SetInstruction($"計測中... あと <size=120%>{remainingTime:F1}</size> 秒\n<color=yellow>そのまま握っていて！</color>");
             }
             else
             {
-                // 条件を満たさなくなった場合、計測をリセットして最初からやり直す
                 timer = 0f;
-                sum = 0f;
+                sum1 = 0f;
+                sum2 = 0f;
                 count = 0;
-
-                SetInstruction("つり革を\nギュッと握ってください");
+                SetInstruction("つり革を\n両手でギュッと握ってください");
             }
 
             yield return null;
         }
 
-        // 計測完了: 平均値を算出（データがない場合はデバッグ値を採用）
-        float onValue = (count > 0) ? sum / count : debugVirtualValue;
+        // 平均値を算出
+        float onValue1 = (count > 0) ? sum1 / count : debugVirtualValue;
+        float onValue2 = (count > 0) ? sum2 / count : debugVirtualValue;
 
         SetInstruction("OK!");
         yield return new WaitForSeconds(1.0f);
@@ -148,19 +153,27 @@ public class SessionCalibration : MonoBehaviour
         // =================================================================
 
         timer = 0f;
-        sum = 0f;
+        sum1 = 0f;
+        sum2 = 0f;
         count = 0;
 
         while (timer < measureDuration)
         {
-            float currentVal = GetCurrentValue();
+            float val1 = 0f;
+            float val2 = 0f;
 
-            // 信号値が閾値を下回っているか判定
-            if (currentVal < waitOffThreshold)
+            if (ArduinoInputManager.instance != null && !Input.GetKey(KeyCode.Space))
             {
-                // 条件を満たしている場合、計測を進める
+                val1 = ArduinoInputManager.instance.SmoothedGripValue1;
+                val2 = ArduinoInputManager.instance.SmoothedGripValue2;
+            }
+
+            // 両方のセンサーが閾値を下回っているか判定
+            if (val1 < waitOffThreshold && val2 < waitOffThreshold)
+            {
                 timer += Time.deltaTime;
-                sum += currentVal;
+                sum1 += val1;
+                sum2 += val2;
                 count++;
 
                 float remainingTime = Mathf.Max(0f, measureDuration - timer);
@@ -168,19 +181,18 @@ public class SessionCalibration : MonoBehaviour
             }
             else
             {
-                // 手が触れてしまった場合、計測をリセット
                 timer = 0f;
-                sum = 0f;
+                sum1 = 0f;
+                sum2 = 0f;
                 count = 0;
-
                 SetInstruction("手を離して\nリラックスしてください");
             }
 
             yield return null;
         }
 
-        // 計測完了: 平均値を算出
-        float offValue = (count > 0) ? sum / count : 0f;
+        float offValue1 = (count > 0) ? sum1 / count : 0f;
+        float offValue2 = (count > 0) ? sum2 / count : 0f;
 
 
         // =================================================================
@@ -189,17 +201,14 @@ public class SessionCalibration : MonoBehaviour
 
         SetInstruction("準備完了！");
 
-        // 計測値の差分が極端に小さい場合のフェイルセーフ処理
-        // センサー異常時でもゲーム進行を妨げないための暫定値を設定
-        if (Mathf.Abs(onValue - offValue) < 5f)
-        {
-            onValue = offValue + 200f;
-        }
+        // フェイルセーフ: 差分が小さすぎる場合は補正
+        if (Mathf.Abs(onValue1 - offValue1) < 5f) onValue1 = offValue1 + 200f;
+        if (Mathf.Abs(onValue2 - offValue2) < 5f) onValue2 = offValue2 + 200f;
 
-        // 計測結果をPlayerControllerへ注入
+        // PlayerControllerへ4つの値を注入（Min1, Max1, Min2, Max2）
         if (playerController != null)
         {
-            playerController.SetCalibrationValues(offValue, onValue);
+            playerController.SetCalibrationValues(offValue1, onValue1, offValue2, onValue2);
         }
         else
         {
@@ -208,7 +217,6 @@ public class SessionCalibration : MonoBehaviour
 
         yield return new WaitForSeconds(1.0f);
 
-        // キャリブレーション画面を閉じ、ゲーム本編のチュートリアルへ移行
         if (overlayPanel != null) overlayPanel.SetActive(false);
 
         if (stageManager != null)
@@ -221,10 +229,6 @@ public class SessionCalibration : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 画面上の指示テキストを更新する。
-    /// </summary>
-    /// <param name="message">表示するメッセージ文字列</param>
     private void SetInstruction(string message)
     {
         if (instructionText != null)

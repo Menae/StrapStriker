@@ -13,11 +13,6 @@ public class RetryInputHandler : MonoBehaviour
     private StageManager stageManager;
     private bool isRetrying = false;
 
-    /// <summary>
-    /// 初期化処理。
-    /// シーン内のStageManagerを自動検索し、参照を保持する。
-    /// 見つからない場合はエラーログを出力する。
-    /// </summary>
     void Start()
     {
         stageManager = FindObjectOfType<StageManager>();
@@ -27,11 +22,6 @@ public class RetryInputHandler : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 毎フレーム実行される更新処理。
-    /// Arduino握力入力またはスペースキー入力を監視し、しきい値を超えた場合にリトライを実行する。
-    /// 多重実行を防ぐため、一度リトライが発動すると次回以降は入力を受け付けない。
-    /// </summary>
     void Update()
     {
         if (isRetrying || stageManager == null)
@@ -39,7 +29,14 @@ public class RetryInputHandler : MonoBehaviour
             return;
         }
 
-        bool arduinoInput = (ArduinoInputManager.instance != null && ArduinoInputManager.GripValue >= gripThreshold);
+        bool arduinoInput = false;
+        if (ArduinoInputManager.instance != null)
+        {
+            // 両方のセンサー値が閾値を超えているか確認
+            arduinoInput = (ArduinoInputManager.GripValue1 >= gripThreshold &&
+                            ArduinoInputManager.GripValue2 >= gripThreshold);
+        }
+
         bool keyboardInput = Input.GetKeyDown(KeyCode.Space);
 
         if (arduinoInput || keyboardInput)

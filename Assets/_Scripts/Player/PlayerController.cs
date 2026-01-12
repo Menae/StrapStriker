@@ -107,15 +107,13 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private bool debugMode = false;
 
     // --- キャリブレーション用内部変数 ---
-    /// <summary>
-    /// 離している時のセンサー値（最小値/ベースライン）。
-    /// </summary>
-    private float calibrationMin = 0f;
+    // センサー1用
+    private float calibrationMin1 = 0f;
+    private float calibrationMax1 = 1000f;
 
-    /// <summary>
-    /// 握っている時のセンサー値（最大値/アクティブ）。
-    /// </summary>
-    private float calibrationMax = 1000f;
+    // センサー2用
+    private float calibrationMin2 = 0f;
+    private float calibrationMax2 = 1000f;
 
     /// <summary>
     /// キャリブレーション値が設定済みかどうか。
@@ -235,27 +233,28 @@ public class PlayerController : MonoBehaviour
             gameStartTime = Time.time;
         }
 
+        // 現在のセンサー値を取得 (2系統)
+        float currentGrip1 = (ArduinoInputManager.instance != null) ? ArduinoInputManager.instance.SmoothedGripValue1 : 0f;
+        float currentGrip2 = (ArduinoInputManager.instance != null) ? ArduinoInputManager.instance.SmoothedGripValue2 : 0f;
+
+        // 正規化 (0.0 ～ 1.0)
+        float norm1 = Mathf.InverseLerp(calibrationMin1, calibrationMax1, currentGrip1);
+        float norm2 = Mathf.InverseLerp(calibrationMin2, calibrationMax2, currentGrip2);
+
         // ゲーム開始直後の誤動作防止（入力遅延）
         if (Time.time < gameStartTime + inputDelayAfterStart)
         {
             // 遅延中も前フレームの状態としては更新しておく
-            float current = (ArduinoInputManager.instance != null) ? ArduinoInputManager.instance.SmoothedGripValue : 0f;
-            float norm = Mathf.InverseLerp(calibrationMin, calibrationMax, current);
-            wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || (norm > gripNormalizedThreshold);
+            // 両方のセンサーが閾値を超えているかを判定
+            bool active = (norm1 > gripNormalizedThreshold) && (norm2 > gripNormalizedThreshold);
+            wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || active;
             return;
         }
 
         // --- 握力（接触）判定ロジック ---
 
-        // 1. ArduinoInputManagerから平滑化された現在値を取得
-        float currentGrip = (ArduinoInputManager.instance != null) ? ArduinoInputManager.instance.SmoothedGripValue : 0f;
-
-        // 2. キャリブレーション範囲に基づいて 0.0～1.0 に正規化
-        // InverseLerpは min > max の場合でも適切に補間比率を計算してくれる
-        float normalizedGrip = Mathf.InverseLerp(calibrationMin, calibrationMax, currentGrip);
-
-        // 3. 閾値判定
-        bool isSensorActive = normalizedGrip > gripNormalizedThreshold;
+        // 3. 閾値判定 (両方のセンサーが閾値を超えた場合のみ「掴んでいる」とみなす)
+        bool isSensorActive = (norm1 > gripNormalizedThreshold) && (norm2 > gripNormalizedThreshold);
 
         // Spaceキー(デバッグ用) または センサー判定
         bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || isSensorActive;
@@ -385,16 +384,20 @@ public class PlayerController : MonoBehaviour
     /// 外部（SessionCalibrationクラス）からキャリブレーション結果を注入するためのメソッド。
     /// このメソッドが呼ばれることで isCalibrated が true になり、操作が可能になる。
     /// </summary>
-    /// <param name="minGrip">離している状態（OFF）の計測値</param>
-    /// <param name="maxGrip">握っている状態（ON）の計測値</param>
-    public void SetCalibrationValues(float minGrip, float maxGrip)
+    /// <param name="min1">センサー1の最小値(OFF)</param>
+    /// <param name="max1">センサー1の最大値(ON)</param>
+    /// <param name="min2">センサー2の最小値(OFF)</param>
+    /// <param name="max2">センサー2の最大値(ON)</param>
+    public void SetCalibrationValues(float min1, float max1, float min2, float max2)
     {
-        this.calibrationMin = minGrip;
-        this.calibrationMax = maxGrip;
+        this.calibrationMin1 = min1;
+        this.calibrationMax1 = max1;
+        this.calibrationMin2 = min2;
+        this.calibrationMax2 = max2;
         this.isCalibrated = true;
 
         // デバッグログで注入された値を確認
-        Debug.Log($"<color=cyan>Calibration Applied:</color> OFF(Min)={minGrip:F1}, ON(Max)={maxGrip:F1}");
+        Debug.Log($"<color=cyan>Calibration Applied:</color> Sensor1[{min1:F0}-{max1:F0}], Sensor2[{min2:F0}-{max2:F0}]");
     }
 
     /// <summary>

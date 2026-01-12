@@ -34,17 +34,24 @@ public class ArduinoInputManager : MonoBehaviour
     public bool IsConnected { get; private set; } = false;
 
     /// <summary>
-    /// Arduinoから送られてきた生のセンサー値。
-    /// 別スレッドから頻繁に書き込まれるため、volatileキーワードでメモリの可視性を保証している。
-    /// ノイズが含まれるため、直接の使用は非推奨。
+    /// Arduinoから送られてきた生のセンサー値（センサー1）。
     /// </summary>
-    public static volatile int GripValue;
+    public static volatile int GripValue1;
 
     /// <summary>
-    /// ノイズ除去済みの滑らかなセンサー値。
-    /// ゲームロジック（キャリブレーションや判定）では、原則としてこの値を使用する。
+    /// Arduinoから送られてきた生のセンサー値（センサー2）。
     /// </summary>
-    public float SmoothedGripValue { get; private set; } = 0f;
+    public static volatile int GripValue2;
+
+    /// <summary>
+    /// ノイズ除去済みの滑らかなセンサー値（センサー1）。
+    /// </summary>
+    public float SmoothedGripValue1 { get; private set; } = 0f;
+
+    /// <summary>
+    /// ノイズ除去済みの滑らかなセンサー値（センサー2）。
+    /// </summary>
+    public float SmoothedGripValue2 { get; private set; } = 0f;
 
     // 内部変数
     private SerialPort serialPort;
@@ -82,9 +89,9 @@ public class ArduinoInputManager : MonoBehaviour
     /// </summary>
     void Update()
     {
-        // 生データ(GripValue)に向かって、SmoothedGripValueを徐々に近づける（線形補間）。
-        // これにより、センサー特有のスパイクノイズやチャタリングを抑制し、安定した値を提供する。
-        SmoothedGripValue = Mathf.Lerp(SmoothedGripValue, (float)GripValue, smoothingFactor);
+        // 2つのセンサーそれぞれに対してスムージングを行う
+        SmoothedGripValue1 = Mathf.Lerp(SmoothedGripValue1, (float)GripValue1, smoothingFactor);
+        SmoothedGripValue2 = Mathf.Lerp(SmoothedGripValue2, (float)GripValue2, smoothingFactor);
     }
 
     /// <summary>
@@ -130,7 +137,7 @@ public class ArduinoInputManager : MonoBehaviour
 
     /// <summary>
     /// 別スレッドで実行されるデータ読み取りループ。
-    /// Serial.printlnで送られてくる1行ごとのデータを解析し、GripValueを更新する。
+    /// "値1,値2" 形式のデータを解析し、GripValue1, GripValue2を更新する。
     /// </summary>
     private void ReadSerialData()
     {
@@ -138,11 +145,22 @@ public class ArduinoInputManager : MonoBehaviour
         {
             try
             {
-                // 1行読み取り、整数に変換して格納
+                // 1行読み取り
                 string line = serialPort.ReadLine();
-                if (int.TryParse(line, out int value))
+                if (string.IsNullOrEmpty(line)) continue;
+
+                // カンマで分割 (例: "1000,1200")
+                string[] parts = line.Split(',');
+
+                if (parts.Length >= 2)
                 {
-                    GripValue = value;
+                    // 両方の値が正常にパースできた場合のみ更新
+                    if (int.TryParse(parts[0].Trim(), out int val1) &&
+                        int.TryParse(parts[1].Trim(), out int val2))
+                    {
+                        GripValue1 = val1;
+                        GripValue2 = val2;
+                    }
                 }
             }
             catch (TimeoutException)

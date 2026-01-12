@@ -1,0 +1,2 @@
+port_name=COM7
+# Change this value to match your Arduino port (e.g., COM3, /dev/tty...)

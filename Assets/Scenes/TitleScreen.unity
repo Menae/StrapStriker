@@ -1398,6 +1398,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackPortName: COM7
   baudRate: 9600
+  smoothingFactor: 0.2
 --- !u!4 &2085190142
 Transform:
   m_ObjectHideFlags: 0
@@ -1456,7 +1457,7 @@ SceneRoots:
   - {fileID: 38583751}
   - {fileID: 1633386001}
   - {fileID: 1077156699}
+  - {fileID: 2085190142}
   - {fileID: 787294255}
   - {fileID: 616916675}
-  - {fileID: 2085190142}
   - {fileID: 744805677}

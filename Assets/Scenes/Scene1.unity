@@ -6422,7 +6422,7 @@ MonoBehaviour:
   inertiaBonusMultiplier: 2
   inertiaSwingBonus: 1.5
   gripReleaseGracePeriod: 0.1
-  debugMode: 0
+  debugMode: 1
   inputDelayAfterStart: 0.1
 --- !u!61 &1082202013
 BoxCollider2D:

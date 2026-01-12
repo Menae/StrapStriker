@@ -13,10 +13,6 @@ public class TutorialInputHandler : MonoBehaviour
     private StageManager stageManager;
     private bool gameStarted = false;
 
-    /// <summary>
-    /// 初期化処理。
-    /// シーン内のStageManagerを自動検索して参照を取得する。
-    /// </summary>
     void Start()
     {
         stageManager = FindObjectOfType<StageManager>();
@@ -26,12 +22,6 @@ public class TutorialInputHandler : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 毎フレーム実行される更新処理。
-    /// ゲーム未開始時にArduino握力またはスペースキー入力を監視し、
-    /// しきい値を超えたらStageManager.StartGame()を呼び出す。
-    /// 複数回呼び出しを防ぐためgameStartedフラグで制御する。
-    /// </summary>
     void Update()
     {
         if (gameStarted || stageManager == null)
@@ -39,7 +29,14 @@ public class TutorialInputHandler : MonoBehaviour
             return;
         }
 
-        bool arduinoInput = (ArduinoInputManager.instance != null && ArduinoInputManager.GripValue >= gripThreshold);
+        bool arduinoInput = false;
+        if (ArduinoInputManager.instance != null)
+        {
+            // 両方のセンサー値が閾値を超えているか確認
+            arduinoInput = (ArduinoInputManager.GripValue1 >= gripThreshold &&
+                            ArduinoInputManager.GripValue2 >= gripThreshold);
+        }
+
         bool keyboardInput = Input.GetKeyDown(KeyCode.Space);
 
         if (arduinoInput || keyboardInput)
