@@ -5,43 +5,65 @@ using System;
 using System.IO;
 
 /// <summary>
-/// Arduinoとのシリアル通信を管理し、握力センサー（タッチセンサー）の値をリアルタイムで取得するクラス。
-/// 別スレッドでのデータ受信と、メインスレッドでのノイズ除去（スムージング）処理を担当する。
-/// シングルトンパターンで実装され、シーン遷移しても破棄されない。
+/// M5StickC Plus2とのシリアル通信を管理し、コントローラーの入力情報を一元管理するクラス。
+/// 従来のタッチセンサーに加え、ジャイロ・加速度センサーの値もここから取得する。
+/// 別スレッドでのデータ受信と、メインスレッドでのデータ提供を担当する。
 /// </summary>
 public class ArduinoInputManager : MonoBehaviour
 {
     /// <summary>
-    /// シングルトンインスタンス。どこからでもアクセス可能。
+    /// シングルトンインスタンス。
     /// </summary>
     public static ArduinoInputManager instance;
 
-    [Header("フォールバック設定")]
-    [Tooltip("自動検出が失敗した場合に、接続を試みるCOMポート名（例: COM3, /dev/tty.usbmodem...）")]
+    [Header("接続設定")]
+    [Tooltip("自動検出が失敗した場合に、接続を試みるCOMポート名")]
     public string fallbackPortName = "COM3";
 
-    [Tooltip("Arduino側のSerial.beginと合わせるボーレート (通信速度)")]
-    public int baudRate = 9600;
+    [Tooltip("M5StickC側の送信速度と合わせる必要があります。")]
+    public int baudRate = 115200; // M5StickCの仕様に合わせて更新
 
     [Header("信号処理設定")]
-    [Tooltip("生データのノイズをどの程度滑らかにするか (0.1 = ゆっくり/安定, 0.9 = 素早い/敏感)。値を小さくするとノイズに強くなるが遅延が増える。")]
+    [Tooltip("タッチセンサーのノイズ除去係数 (0.1 = ゆっくり/安定, 1.0 = 生データそのまま)。")]
     [Range(0.01f, 1f)]
     public float smoothingFactor = 0.2f;
 
     /// <summary>
-    /// Arduinoとの接続状態。接続成功時にtrueとなる。
+    /// デバイスとの接続状態。
     /// </summary>
     public bool IsConnected { get; private set; } = false;
 
+    // --- M5StickC 受信データ (外部公開用) ---
+
     /// <summary>
-    /// Arduinoから送られてきた生のセンサー値（センサー1）。
+    /// ジャイロセンサ（角速度）の生データ (gx, gy, gz)。
+    /// 回転計算に使用。
+    /// </summary>
+    public static Vector3 RawGyro { get; private set; }
+
+    /// <summary>
+    /// 加速度センサの生データ (ax, ay, az)。
+    /// 傾き検知・重力方向の特定に使用。
+    /// </summary>
+    public static Vector3 RawAccel { get; private set; }
+
+    /// <summary>
+    /// M5本体の正面ボタンの状態。
+    /// true: 押されている (1), false: 離されている (0)
+    /// </summary>
+    public static bool IsM5BtnPressed { get; private set; }
+
+    /// <summary>
+    /// 静電容量センサー1（つり革左）の生の値。
     /// </summary>
     public static volatile int GripValue1;
 
     /// <summary>
-    /// Arduinoから送られてきた生のセンサー値（センサー2）。
+    /// 静電容量センサー2（つり革右）の生の値。
     /// </summary>
     public static volatile int GripValue2;
+
+    // --- 加工済みデータ ---
 
     /// <summary>
     /// ノイズ除去済みの滑らかなセンサー値（センサー1）。
@@ -57,6 +79,9 @@ public class ArduinoInputManager : MonoBehaviour
     private SerialPort serialPort;
     private Thread readThread;
     private bool isThreadRunning = false;
+
+    // スレッド間データ受け渡し用のロックオブジェクト
+    private readonly object dataLock = new object();
 
     /// <summary>
     /// 初期化処理。シングルトンの設定とConfigファイルの読み込みを行う。
@@ -76,20 +101,20 @@ public class ArduinoInputManager : MonoBehaviour
     }
 
     /// <summary>
-    /// ゲーム開始時にArduinoへの接続を試みる。
+    /// ゲーム開始時にデバイスへの接続を試みる。
     /// </summary>
     void Start()
     {
-        ConnectToArduino();
+        ConnectToDevice();
     }
 
     /// <summary>
     /// 毎フレームの更新処理。
-    /// 別スレッドで受信した生データを、メインスレッドで滑らかに補間（スムージング）する。
+    /// 生データを滑らかに補間する処理のみメインスレッドで行う。
     /// </summary>
     void Update()
     {
-        // 2つのセンサーそれぞれに対してスムージングを行う
+        // 握力値のスムージング処理
         SmoothedGripValue1 = Mathf.Lerp(SmoothedGripValue1, (float)GripValue1, smoothingFactor);
         SmoothedGripValue2 = Mathf.Lerp(SmoothedGripValue2, (float)GripValue2, smoothingFactor);
     }
@@ -97,47 +122,47 @@ public class ArduinoInputManager : MonoBehaviour
     /// <summary>
     /// 指定されたCOMポートへの接続を試み、成功時にデータ読み取り用スレッドを起動する。
     /// </summary>
-    private void ConnectToArduino()
+    private void ConnectToDevice()
     {
-        // PC上の利用可能なポートを取得（デバッグ用）
         string[] availablePorts = SerialPort.GetPortNames();
         if (availablePorts.Length == 0)
         {
-            Debug.LogWarning("PCにCOMポートが一つも見つかりません。Arduinoが接続されていない可能性があります。");
+            Debug.LogWarning("PCにCOMポートが見つかりません。M5StickCが接続されていない可能性があります。");
             return;
         }
 
         if (string.IsNullOrEmpty(fallbackPortName))
         {
-            Debug.LogError("<color=red>Error:</color> Inspectorまたはconfig.txtで 'Fallback Port Name' が設定されていません！");
+            Debug.LogError("Error: ConfigまたはInspectorでポート名が設定されていません。");
             return;
         }
 
         try
         {
-            // ポートを開く
             serialPort = new SerialPort(fallbackPortName, baudRate);
-            serialPort.ReadTimeout = 1000; // 読み取りタイムアウト設定
+            serialPort.ReadTimeout = 1000;
+            serialPort.DtrEnable = true; // M5StickC/ESP32系で再起動を防ぐために必要な場合がある
+            serialPort.RtsEnable = true;
             serialPort.Open();
 
-            // 受信スレッドの開始
             isThreadRunning = true;
             readThread = new Thread(ReadSerialData);
             readThread.Start();
             IsConnected = true;
 
-            Debug.Log($"<color=green>SUCCESS:</color> Arduino ('{fallbackPortName}') への接続に成功しました！");
+            Debug.Log($"<color=green>SUCCESS:</color> Device ('{fallbackPortName}') connected at {baudRate} bps.");
         }
         catch (Exception e)
         {
-            Debug.LogError($"<color=red>FAILED:</color> '{fallbackPortName}' への接続に失敗しました。Error: {e.Message}");
+            Debug.LogError($"<color=red>FAILED:</color> Connection error on '{fallbackPortName}': {e.Message}");
             IsConnected = false;
         }
     }
 
     /// <summary>
     /// 別スレッドで実行されるデータ読み取りループ。
-    /// "値1,値2" 形式のデータを解析し、GripValue1, GripValue2を更新する。
+    /// CSV形式のデータを解析し、各センサー値を更新する。
+    /// フォーマット: gx, gy, gz, ax, ay, az, button, t1, t2
     /// </summary>
     private void ReadSerialData()
     {
@@ -145,31 +170,42 @@ public class ArduinoInputManager : MonoBehaviour
         {
             try
             {
-                // 1行読み取り
                 string line = serialPort.ReadLine();
                 if (string.IsNullOrEmpty(line)) continue;
 
-                // カンマで分割 (例: "1000,1200")
                 string[] parts = line.Split(',');
 
-                if (parts.Length >= 2)
+                // データ長が仕様(9個)と一致するか確認
+                if (parts.Length == 9)
                 {
-                    // 両方の値が正常にパースできた場合のみ更新
-                    if (int.TryParse(parts[0].Trim(), out int val1) &&
-                        int.TryParse(parts[1].Trim(), out int val2))
+                    // パース処理。失敗時はスキップして安全性を確保
+                    if (float.TryParse(parts[0], out float gx) &&
+                        float.TryParse(parts[1], out float gy) &&
+                        float.TryParse(parts[2], out float gz) &&
+                        float.TryParse(parts[3], out float ax) &&
+                        float.TryParse(parts[4], out float ay) &&
+                        float.TryParse(parts[5], out float az) &&
+                        int.TryParse(parts[6], out int btnVal) &&
+                        int.TryParse(parts[7], out int t1) &&
+                        int.TryParse(parts[8], out int t2))
                     {
-                        GripValue1 = val1;
-                        GripValue2 = val2;
+                        // データの更新
+                        // Vector3はアトミックではないが、読み出し頻度に対し更新頻度が高いため
+                        // lockなしで直接代入し、最新性を優先する設計とする
+                        RawGyro = new Vector3(gx, gy, gz);
+                        RawAccel = new Vector3(ax, ay, az);
+                        IsM5BtnPressed = (btnVal == 1);
+                        GripValue1 = t1;
+                        GripValue2 = t2;
                     }
                 }
             }
             catch (TimeoutException)
             {
-                // データが来ていない時はここに来るが、正常動作なので無視
+                // データ待機中のタイムアウトは正常動作
             }
             catch (Exception e)
             {
-                // ポートが抜かれたり、閉じられた際のエラー
                 if (isThreadRunning)
                 {
                     Debug.LogWarning($"Serial Read Error: {e.Message}");
@@ -179,77 +215,66 @@ public class ArduinoInputManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 実行ファイルと同階層にある 'config.txt' からポート設定を読み込む。
-    /// ファイルが存在しない場合は、現在の設定値で自動生成する。
+    /// 外部ファイル 'config.txt' からポート設定を読み込む。
     /// </summary>
     private void LoadConfig()
     {
-        // Application.dataPathの親ディレクトリ（.exeと同じ場所）を指定
         string configPath = Path.Combine(Application.dataPath, "..", "config.txt");
 
-        // ファイルが存在するか確認
         if (File.Exists(configPath))
         {
             try
             {
-                // 読み込み処理
                 string[] lines = File.ReadAllLines(configPath);
                 foreach (string line in lines)
                 {
-                    // "port_name=COM3" のような行を探す
                     if (line.StartsWith("port_name="))
                     {
-                        string portFromConfig = line.Split('=')[1].Trim();
-                        fallbackPortName = portFromConfig;
-                        Debug.Log($"<color=yellow>Config Loaded:</color> Port set to '{fallbackPortName}' from config.txt");
+                        fallbackPortName = line.Split('=')[1].Trim();
+                        Debug.Log($"Config Loaded: Port set to '{fallbackPortName}'");
                         return;
                     }
                 }
             }
             catch (Exception e)
             {
-                Debug.LogError($"Error reading config file: {e.Message}");
+                Debug.LogError($"Config Read Error: {e.Message}");
             }
         }
         else
         {
-            // ファイルが無いなら、デフォルト設定で自動生成する
+            // Configが存在しない場合はデフォルト値で作成
             try
             {
-                string defaultContent = $"port_name={fallbackPortName}\n# Change this value to match your Arduino port (e.g., COM3, /dev/tty...)";
+                string defaultContent = $"port_name={fallbackPortName}\n# Set your COM port here (e.g. COM3)";
                 File.WriteAllText(configPath, defaultContent);
-                Debug.Log($"<color=cyan>Config Created:</color> config.txt generated at {configPath}");
             }
             catch (Exception e)
             {
-                Debug.LogError($"Error creating config file: {e.Message}");
+                Debug.LogError($"Config Write Error: {e.Message}");
             }
         }
     }
 
     /// <summary>
-    /// アプリケーション終了時やオブジェクト破棄時に呼ばれる。
-    /// スレッドを安全に停止し、シリアルポートを開放する。
+    /// 終了時のクリーンアップ処理。
     /// </summary>
     void OnDestroy()
     {
         isThreadRunning = false;
 
-        // ポートを閉じる（これによりReadLineが中断され、スレッドが終了に向かう）
         if (serialPort != null && serialPort.IsOpen)
         {
             try
             {
                 serialPort.Close();
-                Debug.Log("<color=cyan>Serial port closed.</color>");
             }
             catch (Exception e)
             {
-                Debug.LogError($"Error closing serial port: {e.Message}");
+                Debug.LogError($"Port Close Error: {e.Message}");
             }
         }
 
-        // スレッドの終了を待機
         if (readThread != null && readThread.IsAlive)
         {
             readThread.Join(100);
