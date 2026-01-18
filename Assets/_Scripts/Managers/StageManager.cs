@@ -21,17 +21,27 @@ public class SoundEffect
 }
 
 /// <summary>
-/// 駅イベントのデータ構造。
-/// 到着タイミング、スポーン数、駅名、背景スプライトをセットで保持する。
+/// どの種類の敵を何体、どこに出すかの定義。
 /// </summary>
+[System.Serializable]
+public struct SpawnWave
+{
+    [Tooltip("スポーンさせる敵の種類")]
+    public NPCType npcType;
+    [Tooltip("スポーン数")]
+    public int count;
+    [Tooltip("ドア付近にスポーンさせるか（falseならエリア内ランダム）")]
+    public bool spawnAtDoor;
+}
+
 [System.Serializable]
 public class StationEvent
 {
     [Tooltip("この駅に到着するまでの時間(秒)")]
     public float timeToArrival;
 
-    [Tooltip("この駅でスポーンさせるNPCの数")]
-    public int npcsToSpawn;
+    [Tooltip("この駅で発生する敵のスポーンウェーブ")]
+    public List<SpawnWave> spawnWaves;
 
     [Tooltip("駅の名前(UI表示用)")]
     public string stationName;
@@ -142,6 +152,15 @@ public class StageManager : MonoBehaviour
     public float delayBeforeSpawn = 2.0f;
     public float stationStopTime = 5.0f;
     public float accelerationTime = 3.0f;
+
+    [Header("リザルト・評価設定")]
+    [Tooltip("リザルト演出を管理するスクリプト")]
+    public ResultUIController resultUI;
+
+    [Tooltip("星2を獲得するために必要な撃破数")]
+    public int rankThreshold2Stars = 10;
+    [Tooltip("星3を獲得するために必要な撃破数")]
+    public int rankThreshold3Stars = 20;
 
     [Header("最終走行(クリア)の設定")]
     public float finalRunDuration = 20f;
@@ -444,6 +463,12 @@ public class StageManager : MonoBehaviour
         TriggerStageClear();
     }
 
+    /// <summary>
+    /// 駅への到着から出発までの一連のシーケンスを処理するコルーチン。
+    /// 減速、停車、NPCスポーン（Wave対応版）、加速の各フェーズを順番に実行する。
+    /// 混雑率が最大値を超えた場合はゲームオーバーにする。
+    /// </summary>
+    /// <param name="station">到着する駅のイベントデータ</param>
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
         if (parallaxController != null)
@@ -470,8 +495,22 @@ public class StageManager : MonoBehaviour
             DoorManager.OpenAllDoors();
         }
 
-        int spawnedCount = NPCManager.instance.SpawnNPCs(this, station.npcsToSpawn);
-        currentCongestionRate += spawnedCount * rateDecreasePerNpc;
+        // --- spawnWavesリストに基づいてループ処理 ---
+        // 各Waveの設定に従って、指定された種類・数のNPCをスポーンさせる
+        int totalSpawnedCount = 0;
+
+        if (station.spawnWaves != null)
+        {
+            foreach (var wave in station.spawnWaves)
+            {
+                // NPCManagerに追加した SpawnSpecificNPCs メソッドを使用
+                int c = NPCManager.instance.SpawnSpecificNPCs(this, wave.npcType, wave.count, wave.spawnAtDoor);
+                totalSpawnedCount += c;
+            }
+        }
+
+        // 混雑率の更新（スポーンした総数を使用）
+        currentCongestionRate += totalSpawnedCount * rateDecreasePerNpc;
         UpdateCongestionUI();
 
         if (currentCongestionRate >= maxCongestionRate)
@@ -500,6 +539,10 @@ public class StageManager : MonoBehaviour
         CurrentInertia = Vector2.zero;
     }
 
+    /// <summary>
+    /// ステージクリア処理。
+    /// 撃破数に基づいて評価を計算し、リザルト画面を表示する。
+    /// </summary>
     private void TriggerStageClear()
     {
         CurrentState = GameState.StageClear;
@@ -507,8 +550,33 @@ public class StageManager : MonoBehaviour
         SetStatusDisplay(StatusDisplayType.Stopped);
 
         if (stationNameText != null) stationNameText.text = "";
-        if (clearPanel != null) clearPanel.SetActive(true);
+
+        // --- 変更: 旧パネル表示を廃止し、新しいリザルト処理へ ---
+        // if (clearPanel != null) clearPanel.SetActive(true); 
+
         Debug.Log("ステージクリア！");
+
+        // 星の数を計算
+        int starCount = 1; // クリアすれば最低星1
+        if (defeatedNpcCount >= rankThreshold3Stars)
+        {
+            starCount = 3;
+        }
+        else if (defeatedNpcCount >= rankThreshold2Stars)
+        {
+            starCount = 2;
+        }
+
+        // リザルトUIに表示依頼
+        if (resultUI != null)
+        {
+            resultUI.ShowResult(defeatedNpcCount, starCount);
+        }
+        else
+        {
+            // ResultUIが設定されていない場合のフォールバック（旧パネルがあれば出す）
+            if (clearPanel != null) clearPanel.SetActive(true);
+        }
     }
 
     public void TogglePause()

@@ -114,6 +114,16 @@ public class PlayerController : MonoBehaviour
     [Tooltip("慣性がスイングトルクに与えるボーナス")]
     public float inertiaSwingBonus = 5f;
 
+    [Header("▼ モバイルバッテリー設定")]
+    [Tooltip("バッテリー爆発時のプレイヤーへの前方推進力")]
+    public float batteryExplosionSelfForce = 20f;
+    [Tooltip("爆発が他のNPCに影響する半径")]
+    public float batteryExplosionRadius = 3.0f;
+    [Tooltip("爆発に巻き込まれたNPCに与える衝撃倍率")]
+    public float batteryExplosionImpactMultiplier = 5.0f;
+    [Tooltip("爆発時のエフェクト（任意）")]
+    public GameObject batteryExplosionEffect;
+
     [Header("■ 接地判定")]
     [Tooltip("地面レイヤー")]
     public LayerMask groundLayer;
@@ -170,6 +180,8 @@ public class PlayerController : MonoBehaviour
     // 定数・その他
     private const float MinLaunchPower = 1f;
     private Coroutine grabToSwayCoroutine;
+    private bool hasBattery = false;
+    private bool wasGroundedLastFrame = true; // 着地検出用
 
     /// <summary>
     /// 初期化処理。コンポーネントの参照を取得する。
@@ -320,6 +332,23 @@ public class PlayerController : MonoBehaviour
             float currentDecayRate = debugMode ? 0f : swayDecayRate;
             swayPower = Mathf.Max(0, swayPower - currentDecayRate * Time.fixedDeltaTime);
         }
+
+        // --- バッテリー爆発と着地検出ロジック ---
+        bool isGroundedNow = IsGrounded();
+
+        // 着地判定はLaunchedかIdle時のみ有効にする
+        if (currentState != PlayerState.Grabbing && currentState != PlayerState.Swaying)
+        {
+            if (!wasGroundedLastFrame && isGroundedNow)
+            {
+                if (hasBattery)
+                {
+                    ExplodeBattery();
+                }
+            }
+        }
+
+        wasGroundedLastFrame = isGroundedNow;
     }
 
     /// <summary>
@@ -838,6 +867,60 @@ public class PlayerController : MonoBehaviour
                 npc.TakeImpact(impactVelocity, knockbackMultiplier);
             }
         }
+    }
+
+    /// <summary>
+    /// モバイルバッテリーを装備する。
+    /// BatteryStudentControllerから呼び出される。
+    /// </summary>
+    public void EquipBattery()
+    {
+        hasBattery = true;
+        // 視覚的にわかりやすくするため、ここでプレイヤーの色を変えたりパーティクルを出しても良い
+        Debug.Log("<color=yellow>Player equipped Mobile Battery!</color>");
+    }
+
+    /// <summary>
+    /// 着地時のバッテリー爆発処理。
+    /// 周囲のNPCを吹き飛ばし、自身を前方に加速させる。
+    /// </summary>
+    private void ExplodeBattery()
+    {
+        hasBattery = false; // 消費
+
+        Debug.Log("<color=red>Battery Explosion!</color>");
+
+        // 1. 周囲のNPCを巻き込む
+        Collider2D[] hitColliders = Physics2D.OverlapCircleAll(transform.position, batteryExplosionRadius);
+
+        foreach (var hitCollider in hitColliders)
+        {
+            // 自分自身は除外
+            if (hitCollider.gameObject == this.gameObject) continue;
+
+            NPCController npc = hitCollider.GetComponent<NPCController>();
+            if (npc != null)
+            {
+                // 爆心地からの方向ベクトル
+                Vector2 direction = (npc.transform.position - transform.position).normalized;
+                // 少し上向きに飛ばすと気持ちいい
+                direction += Vector2.up * 0.5f;
+
+                npc.TakeImpact(direction.normalized * 10f, batteryExplosionImpactMultiplier);
+            }
+        }
+
+        // 2. プレイヤー自身を前方に吹き飛ばす
+        Vector2 boostDir = new Vector2(lastFacingDirection, 0.5f).normalized;
+        rb.AddForce(boostDir * batteryExplosionSelfForce, ForceMode2D.Impulse);
+
+        // 3. エフェクト生成
+        if (batteryExplosionEffect != null)
+        {
+            Instantiate(batteryExplosionEffect, transform.position, Quaternion.identity);
+        }
+
+        ChangeState(PlayerState.Launched);
     }
 
     /// <summary>

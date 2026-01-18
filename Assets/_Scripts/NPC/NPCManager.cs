@@ -114,13 +114,72 @@ public class NPCManager : MonoBehaviour
 
     /// <summary>
     /// 1体のNPCをプールから取得し、指定座標にスポーンさせる。
-    /// NPCControllerにStageManagerを紐づけ、管理リストに追加する。
+    /// 現状はとりあえず Normal タイプを生成する設定。
     /// </summary>
-    /// <param name="manager">StageManagerインスタンス</param>
-    /// <param name="position">スポーン座標</param>
     private void SpawnSingleNPC(StageManager manager, Vector2 position)
     {
-        GameObject npcObject = NPCPool.instance.GetNPC();
+        // 変更: GetNPCに引数(NPCType.Normal)を追加
+        GameObject npcObject = NPCPool.instance.GetNPC(NPCType.Normal);
+        npcObject.transform.position = position;
+
+        NPCController controller = npcObject.GetComponent<NPCController>();
+        if (controller != null)
+        {
+            controller.SetStageManager(manager);
+            spawnedNpcs.Add(controller);
+        }
+    }
+
+    /// <summary>
+    /// 種類と場所を指定してNPCをスポーンさせる新メソッド。
+    /// StationEventのSpawnWaveから呼び出される。
+    /// </summary>
+    public int SpawnSpecificNPCs(StageManager manager, NPCType type, int count, bool atDoor)
+    {
+        int spawnedCount = 0;
+
+        if (atDoor && doorSpawnPoints != null && doorSpawnPoints.Count > 0)
+        {
+            // ドア周辺へのスポーン
+            for (int i = 0; i < count; i++)
+            {
+                Transform randomDoor = doorSpawnPoints[Random.Range(0, doorSpawnPoints.Count)];
+                // 少しランダムに散らす
+                float randomXOffset = Random.Range(-burstRadius, burstRadius);
+                Vector2 spawnPos = new Vector2(randomDoor.position.x + randomXOffset, randomDoor.position.y);
+
+                SpawnSingleNPC(manager, spawnPos, type);
+                spawnedCount++;
+            }
+        }
+        else
+        {
+            // エリア内ランダムスポーン
+            for (int i = 0; i < count; i++)
+            {
+                float minX = spawnAreaCenter.x - spawnAreaSize.x / 2;
+                float maxX = spawnAreaCenter.x + spawnAreaSize.x / 2;
+                float fixedY = spawnAreaCenter.y;
+                Vector2 randomPosition = new Vector2(Random.Range(minX, maxX), fixedY);
+
+                SpawnSingleNPC(manager, randomPosition, type);
+                spawnedCount++;
+            }
+        }
+
+        return spawnedCount;
+    }
+
+    /// <summary>
+    /// 内部ヘルパー: タイプを指定して1体生成
+    /// </summary>
+    private void SpawnSingleNPC(StageManager manager, Vector2 position, NPCType type)
+    {
+        // NPCPoolから指定タイプのオブジェクトを取得
+        GameObject npcObject = NPCPool.instance.GetNPC(type);
+
+        if (npcObject == null) return; // 登録忘れ等の対策
+
         npcObject.transform.position = position;
 
         NPCController controller = npcObject.GetComponent<NPCController>();
@@ -162,7 +221,8 @@ public class NPCManager : MonoBehaviour
         if (manager.rateDecreasePerNpc <= 0) return;
 
         int count = Mathf.FloorToInt(congestionRate / manager.rateDecreasePerNpc);
-        SpawnNPCs(manager, count);
+        // 混雑初期配置はとりあえずNormalタイプをランダム配置
+        SpawnSpecificNPCs(manager, NPCType.Normal, count, false);
     }
 
     /// <summary>

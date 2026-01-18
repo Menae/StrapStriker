@@ -80,7 +80,7 @@ public class SessionCalibration : MonoBehaviour
 
     /// <summary>
     /// キャリブレーションのメインフロー制御。
-    /// 2つのセンサー両方について計測を行う。
+    /// 言語切り替えに対応するため、直接のテキストではなくキーを指定して指示を表示する。
     /// </summary>
     private IEnumerator CalibrationSequence()
     {
@@ -99,6 +99,9 @@ public class SessionCalibration : MonoBehaviour
         sum1 = 0f;
         sum2 = 0f;
         count = 0;
+
+        // 変更: 日本語を直接書かず、辞書のキーを指定
+        SetInstruction("calib_grip_instruction");
 
         while (timer < measureDuration)
         {
@@ -126,7 +129,10 @@ public class SessionCalibration : MonoBehaviour
                 count++;
 
                 float remainingTime = Mathf.Max(0f, measureDuration - timer);
-                SetInstruction($"計測中... あと <size=120%>{remainingTime:F1}</size> 秒\n<color=yellow>そのまま握っていて！</color>");
+
+                // 変更: 数値を埋め込むために、第二引数として remainingTime を渡す
+                // 辞書側では "計測中... {0:F1} 秒" のように {0} で受け取る
+                SetInstruction("calib_measuring_grip", remainingTime);
             }
             else
             {
@@ -134,7 +140,8 @@ public class SessionCalibration : MonoBehaviour
                 sum1 = 0f;
                 sum2 = 0f;
                 count = 0;
-                SetInstruction("つり革を\n両手でギュッと握ってください");
+                // リセット時もキーを指定
+                SetInstruction("calib_grip_instruction");
             }
 
             yield return null;
@@ -144,7 +151,8 @@ public class SessionCalibration : MonoBehaviour
         float onValue1 = (count > 0) ? sum1 / count : debugVirtualValue;
         float onValue2 = (count > 0) ? sum2 / count : debugVirtualValue;
 
-        SetInstruction("OK!");
+        // 変更: OKメッセージ
+        SetInstruction("calib_ok");
         yield return new WaitForSeconds(1.0f);
 
 
@@ -156,6 +164,9 @@ public class SessionCalibration : MonoBehaviour
         sum1 = 0f;
         sum2 = 0f;
         count = 0;
+
+        // 変更: 手を離す指示
+        SetInstruction("calib_release_instruction");
 
         while (timer < measureDuration)
         {
@@ -177,7 +188,9 @@ public class SessionCalibration : MonoBehaviour
                 count++;
 
                 float remainingTime = Mathf.Max(0f, measureDuration - timer);
-                SetInstruction($"計測中... あと <size=120%>{remainingTime:F1}</size> 秒\n<color=yellow>そのまま手を離していて！</color>");
+
+                // 変更: OFF計測中のカウントダウン
+                SetInstruction("calib_measuring_release", remainingTime);
             }
             else
             {
@@ -185,7 +198,8 @@ public class SessionCalibration : MonoBehaviour
                 sum1 = 0f;
                 sum2 = 0f;
                 count = 0;
-                SetInstruction("手を離して\nリラックスしてください");
+                // リセット時
+                SetInstruction("calib_release_instruction");
             }
 
             yield return null;
@@ -199,7 +213,8 @@ public class SessionCalibration : MonoBehaviour
         // ステップ3: 計測値の適用とゲーム開始
         // =================================================================
 
-        SetInstruction("準備完了！");
+        // 変更: 完了メッセージ
+        SetInstruction("calib_ready");
 
         // フェイルセーフ: 差分が小さすぎる場合は補正
         if (Mathf.Abs(onValue1 - offValue1) < 5f) onValue1 = offValue1 + 200f;
@@ -229,11 +244,30 @@ public class SessionCalibration : MonoBehaviour
         }
     }
 
-    private void SetInstruction(string message)
+    /// <summary>
+    /// 指定されたキーに対応する翻訳テキストを表示する。
+    /// 数値などの引数(args)がある場合は、{0}, {1} の部分に埋め込む。
+    /// </summary>
+    private void SetInstruction(string key, params object[] args)
     {
-        if (instructionText != null)
+        if (instructionText != null && LocalizationManager.Instance != null)
         {
-            instructionText.text = message;
+            // 1. マネージャーからフォーマット用の文字列をもらう
+            string format = LocalizationManager.Instance.GetText(key);
+
+            // 2. 引数がある場合は埋め込む、なければそのまま使う
+            if (args != null && args.Length > 0)
+            {
+                // string.Formatを使って {0} の部分に数値をねじ込む
+                instructionText.text = string.Format(format, args);
+            }
+            else
+            {
+                instructionText.text = format;
+            }
+
+            // 3. ついでにフォントも正しい言語のものに更新する
+            instructionText.font = LocalizationManager.Instance.GetCurrentFont();
         }
     }
 }

@@ -2,38 +2,31 @@
 using UnityEngine;
 
 /// <summary>
+/// NPCの種類ごとにPrefabを設定するための構造体
+/// </summary>
+[System.Serializable]
+public struct NPCPoolSetting
+{
+    public NPCType type;
+    public GameObject prefab;
+    public int initialPoolSize;
+}
+
+/// <summary>
 /// NPCのオブジェクトプールを管理するシングルトンクラス。
-/// 事前にNPCを生成しておくことで、実行時の負荷を軽減する。
+/// 種類（NPCType）ごとにプールを分けて管理する。
 /// </summary>
 public class NPCPool : MonoBehaviour
 {
-    /// <summary>
-    /// シングルトンインスタンス。
-    /// </summary>
     public static NPCPool instance;
 
     [Header("プール設定")]
-    [Tooltip("プールするNPCのPrefab")]
-    /// <summary>
-    /// プールするNPCのPrefab。Inspectorで設定。
-    /// </summary>
-    public GameObject npcPrefab;
+    [Tooltip("種類ごとのPrefabと初期数を設定")]
+    public List<NPCPoolSetting> poolSettings;
 
-    [Tooltip("最初に生成しておくNPCの数")]
-    /// <summary>
-    /// 初期化時にプールへ生成するNPCの数。
-    /// </summary>
-    public int poolSize = 100;
+    // 種類ごとのキューを管理する辞書
+    private Dictionary<NPCType, Queue<GameObject>> pools = new Dictionary<NPCType, Queue<GameObject>>();
 
-    /// <summary>
-    /// NPCを格納しておくキュー（先入れ先出し）。
-    /// </summary>
-    private Queue<GameObject> npcPool = new Queue<GameObject>();
-
-    /// <summary>
-    /// Awake時にシングルトンを初期化。
-    /// 既にインスタンスが存在する場合は自身を破棄。
-    /// </summary>
     private void Awake()
     {
         if (instance == null)
@@ -46,45 +39,81 @@ public class NPCPool : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Start時に指定数のNPCを事前生成し、非アクティブ状態でプールへ追加。
-    /// </summary>
     void Start()
     {
-        for (int i = 0; i < poolSize; i++)
+        // 設定リストに基づき、各タイプのプールを初期化
+        foreach (var setting in poolSettings)
         {
-            GameObject npc = Instantiate(npcPrefab);
-            npc.SetActive(false);
-            npcPool.Enqueue(npc);
+            if (!pools.ContainsKey(setting.type))
+            {
+                pools[setting.type] = new Queue<GameObject>();
+            }
+
+            for (int i = 0; i < setting.initialPoolSize; i++)
+            {
+                CreateAndEnqueue(setting.prefab, setting.type);
+            }
         }
     }
 
     /// <summary>
-    /// プールからNPCを1体取り出してアクティブ化する。
-    /// プールが空の場合は新規生成を行う。
+    /// 新規生成してキューに追加するヘルパーメソッド
     /// </summary>
-    /// <returns>アクティブ化されたNPCのGameObject。</returns>
-    public GameObject GetNPC()
+    private void CreateAndEnqueue(GameObject prefab, NPCType type)
     {
-        if (npcPool.Count == 0)
-        {
-            GameObject newNpc = Instantiate(npcPrefab);
-            newNpc.SetActive(false);
-            npcPool.Enqueue(newNpc);
-        }
-
-        GameObject availableNpc = npcPool.Dequeue();
-        availableNpc.SetActive(true);
-        return availableNpc;
+        GameObject obj = Instantiate(prefab);
+        obj.SetActive(false);
+        // 生成したオブジェクトがどのタイプか分かるようにComponent等で識別しても良いが、
+        // ここではプール管理のみに徹する
+        pools[type].Enqueue(obj);
     }
 
     /// <summary>
-    /// 使用済みのNPCを非アクティブ化してプールへ返却する。
+    /// 指定したタイプのNPCをプールから取り出す。
+    /// 足りない場合は自動生成して補充する。
     /// </summary>
-    /// <param name="npc">返却するNPCのGameObject。</param>
-    public void ReturnNPC(GameObject npc)
+    public GameObject GetNPC(NPCType type)
+    {
+        // 未登録のタイプならエラー
+        if (!pools.ContainsKey(type))
+        {
+            Debug.LogError($"NPCPool: Type {type} is not registered in PoolSettings!");
+            return null;
+        }
+
+        Queue<GameObject> targetPool = pools[type];
+
+        // プールが空なら補充（設定リストからPrefabを検索）
+        if (targetPool.Count == 0)
+        {
+            NPCPoolSetting setting = poolSettings.Find(s => s.type == type);
+            if (setting.prefab != null)
+            {
+                CreateAndEnqueue(setting.prefab, type);
+            }
+        }
+
+        GameObject npc = targetPool.Dequeue();
+        npc.SetActive(true);
+        return npc;
+    }
+
+    /// <summary>
+    /// 使用済みのNPCをプールへ返却する。
+    /// </summary>
+    /// <param name="npc">返却するオブジェクト</param>
+    /// <param name="type">そのNPCの種類</param>
+    public void ReturnNPC(GameObject npc, NPCType type)
     {
         npc.SetActive(false);
-        npcPool.Enqueue(npc);
+        if (pools.ContainsKey(type))
+        {
+            pools[type].Enqueue(npc);
+        }
+        else
+        {
+            // 万が一キーがない場合は破棄
+            Destroy(npc);
+        }
     }
 }
