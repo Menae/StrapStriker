@@ -6389,41 +6389,46 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   handPoint: {fileID: 1770777878}
+  feetPosition: {fileID: 219443596}
   gripNormalizedThreshold: 0.5
-  useDirectControl: 0
-  invertDirectControl: 1
-  directControlInputRange: 30
-  directControlSmoothSpeed: 5
+  gripReleaseGracePeriod: 0.1
+  inputDelayAfterStart: 0.1
+  accelHorizontalAxis: 0
+  accelVerticalAxis: 2
+  gyroRotationAxis: 4
   swayMaxAngle: 60
+  directControlSmoothSpeed: 5
+  maxSwingStages: 5
+  minStageToLaunch: 2
+  powerPerStage: 20
+  validSwingThresholdAngle: 15
+  validSwingThresholdVelocity: 30
+  stageDecayTime: 1
   swayForceByAngle: 5
   swayForceByVelocity: 0.1
   swayIncreaseRate: 10
-  swayDecayRate: 1
   maxSwayPower: 10
-  powerToSwingMultiplier: 0.05
   swingVelocityThreshold: 5
-  leftSwingAngleMax: 120
-  leftSwingAngleMin: 175
-  rightSwingAngleMin: 185
-  rightSwingAngleMax: 240
+  powerToSwingMultiplier: 0.05
+  swayDecayRate: 1
   launchMultiplier: 1
+  inertiaJumpBoostStrength: 80
   aerialRotationSpeed: 5
   aerialRecatchDampener: 0.5
-  knockbackMultiplier: 2
   maxGrabDistance: 8
   grabToSwayTransitionTime: 0.25
+  knockbackMultiplier: 2
   swayImpactPowerBonus: 0.5
-  feetPosition: {fileID: 219443596}
+  inertiaBonusMultiplier: 2
+  inertiaSwingBonus: 1.5
   groundLayer:
     serializedVersion: 2
     m_Bits: 64
   groundCheckDistance: 0.2
   groundBrakingFactor: 0.1
-  inertiaBonusMultiplier: 2
-  inertiaSwingBonus: 1.5
-  gripReleaseGracePeriod: 0.1
   debugMode: 1
-  inputDelayAfterStart: 0.1
+  useDirectControl: 0
+  invertDirectControl: 0
 --- !u!61 &1082202013
 BoxCollider2D:
   m_ObjectHideFlags: 0

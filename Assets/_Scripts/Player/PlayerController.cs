@@ -1,10 +1,10 @@
 ﻿using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
 /// プレイヤーの状態管理とつり革アクション全般を制御するコントローラー。
 /// M5StickC Plus2（ArduinoInputManager）からの入力に基づき、スイング、空中再掴み、発射動作を制御する。
+/// インスペクタ上でデバイスの取り付け向きに応じた軸マッピング設定が可能。
 /// </summary>
 public class PlayerController : MonoBehaviour
 {
@@ -12,6 +12,19 @@ public class PlayerController : MonoBehaviour
     /// プレイヤーの動作状態定義。
     /// </summary>
     private enum PlayerState { Idle, Grabbing, Swaying, Launched }
+
+    /// <summary>
+    /// M5StickCのセンサー軸定義。物理的な取り付け向きに合わせてマッピングを変更するために使用。
+    /// </summary>
+    public enum M5Axis
+    {
+        PlusX,  // X軸 正方向
+        MinusX, // X軸 負方向 (反転)
+        PlusY,  // Y軸 正方向
+        MinusY, // Y軸 負方向 (反転)
+        PlusZ,  // Z軸 正方向
+        MinusZ  // Z軸 負方向 (反転)
+    }
 
     // ====================================================================
     // Inspector設定項目
@@ -32,37 +45,55 @@ public class PlayerController : MonoBehaviour
     [Tooltip("ゲーム開始後、入力受付を開始するまでの待機時間（秒）")]
     public float inputDelayAfterStart = 0.5f;
 
-    [Header("■ スイング挙動 (物理演算)")]
-    [Tooltip("スイングの最大角度制限（度数法）。アニメーションの正規化や直感操作モードの制限に使用。")]
-    public float swayMaxAngle = 60f; // ★ここが不足していました
+    [Header("■ デバイス軸マッピング設定")]
+    [Tooltip("角度計算の「横成分(X)」として使用するM5StickCの加速度軸")]
+    public M5Axis accelHorizontalAxis = M5Axis.PlusX;
+    [Tooltip("角度計算の「縦成分(Y)」として使用するM5StickCの加速度軸 (重力方向)")]
+    public M5Axis accelVerticalAxis = M5Axis.MinusY;
+    [Tooltip("スイング速度として使用するM5StickCのジャイロ軸 (回転軸)")]
+    public M5Axis gyroRotationAxis = M5Axis.PlusZ;
+
+    [Header("■ スイング挙動 (段階式 DirectControl)")]
+    [Tooltip("スイングの最大角度制限（度数法）。この角度を超えないようにクランプされる。")]
+    public float swayMaxAngle = 60f;
+    [Tooltip("直感操作時の追従スムージング速度")]
+    public float directControlSmoothSpeed = 10f;
+
+    [Header("▼ 勢いステージ設定")]
+    [Tooltip("勢いの最大ステージ数")]
+    public int maxSwingStages = 5;
+    [Tooltip("発射（ジャンプ）が可能になる最低ステージ数。これ未満で離すとただ落下する。")]
+    public int minStageToLaunch = 2;
+    [Tooltip("1ステージあたりに加算される発射パワー")]
+    public float powerPerStage = 20f;
+    [Tooltip("「有効なスイング」と判定されるための最低角度振れ幅（中心からの角度）")]
+    public float validSwingThresholdAngle = 15f;
+    [Tooltip("「有効なスイング」と判定されるための最低通過速度（角速度）")]
+    public float validSwingThresholdVelocity = 30f;
+    [Tooltip("スイングを止めてからステージが減少し始めるまでの猶予時間（秒）")]
+    public float stageDecayTime = 1.0f;
+
+    [Header("■ 物理スイング設定 (旧モード用)")]
     [Tooltip("デバイスの傾きがスイングの力に変換される倍率")]
     public float swayForceByAngle = 20f;
     [Tooltip("デバイスを振る速さ(角速度)がパワー蓄積に与える影響度")]
     public float swayForceByVelocity = 0.1f;
     [Tooltip("パワーが蓄積する基本レート")]
     public float swayIncreaseRate = 10f;
-    [Tooltip("パワーが自然減衰するレート")]
-    public float swayDecayRate = 5f;
     [Tooltip("蓄積できるパワーの最大値")]
     public float maxSwayPower = 100f;
     [Tooltip("スイング成功と判定される回転速度の閾値")]
     public float swingVelocityThreshold = 15f;
     [Tooltip("蓄積パワーがスイングの見た目（トルク）に影響を与える倍率")]
     public float powerToSwingMultiplier = 0.1f;
-
-    [Header("■ スイング角度認識範囲")]
-    [Tooltip("左スイングと認識される最大角度")]
-    public float leftSwingAngleMax = 90f;
-    [Tooltip("左スイングと認識される最小角度")]
-    public float leftSwingAngleMin = 150f;
-    [Tooltip("右スイングと認識される最小角度")]
-    public float rightSwingAngleMin = 210f;
-    [Tooltip("右スイングと認識される最大角度")]
-    public float rightSwingAngleMax = 270f;
+    [Tooltip("パワーが自然減衰するレート")]
+    public float swayDecayRate = 5f;
 
     [Header("■ 発射・空中制御")]
     [Tooltip("パワーを発射速度に変換する倍率")]
-    public float launchMultiplier = 50f;
+    public float launchMultiplier = 1.0f; // ステージ制になったため基準を1.0に変更推奨
+    [Tooltip("慣性力が働いている方向にジャンプした際の飛距離ブースト強度")]
+    public float inertiaJumpBoostStrength = 80f;
     [Tooltip("空中で体を直立に戻す回転速度")]
     public float aerialRotationSpeed = 5f;
     [Tooltip("空中再掴み時の速度減衰率 (0.5 = 50%に減速)")]
@@ -95,13 +126,9 @@ public class PlayerController : MonoBehaviour
     [Header("■ デバッグ・テスト機能")]
     [SerializeField] private bool debugMode = false;
     [Tooltip("【直感操作モード】物理演算を無視し、デバイス角度とキャラ角度を同期させる")]
-    public bool useDirectControl = false;
+    public bool useDirectControl = true; // デフォルトtrue推奨
     [Tooltip("操作の反転")]
     public bool invertDirectControl = true;
-    [Tooltip("直感操作時の最大角度範囲")]
-    public float directControlInputRange = 90f;
-    [Tooltip("直感操作時の追従スムージング速度")]
-    public float directControlSmoothSpeed = 5f;
 
 
     // ====================================================================
@@ -117,9 +144,15 @@ public class PlayerController : MonoBehaviour
     // 状態管理
     private PlayerState currentState = PlayerState.Idle;
     private HangingStrap currentStrap = null;
-    private float swayPower = 0f;
+    private float swayPower = 0f; // 描画や互換性のために残すが、ロジックは swingStage に依存する
     private float lastFacingDirection = 1f; // 1=右, -1=左
     private float gameStartTime = -1f;
+
+    // DirectControl / ステージ管理用変数
+    private int currentSwingStage = 0;          // 現在の勢いステージ
+    private float lastAngleDifference = 0f;     // 前フレームの角度差分（中心交差判定用）
+    private float maxAmplitudeInCurrentSwing = 0f; // 現在の振幅の最大値
+    private float timeSinceLastValidSwing = 0f; // 減衰タイマー
 
     // 入力制御・M5StickCデータ
     private float currentDeviceAngle = 0f;  // 加速度から算出した現在の傾き
@@ -127,10 +160,8 @@ public class PlayerController : MonoBehaviour
     private float timeSinceGripLow = 0f;
 
     // キャリブレーション値 (SessionCalibrationから注入)
-    // センサー1 (左手系)
     private float calibrationMin1 = 0f;
     private float calibrationMax1 = 1000f;
-    // センサー2 (右手系)
     private float calibrationMin2 = 0f;
     private float calibrationMax2 = 1000f;
 
@@ -142,7 +173,6 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>
     /// 初期化処理。コンポーネントの参照を取得する。
-    /// Joy-Conの初期化処理を廃止し、ArduinoInputManager（M5StickC）への依存へ移行。
     /// </summary>
     void Start()
     {
@@ -161,8 +191,6 @@ public class PlayerController : MonoBehaviour
         {
             Debug.LogError("シーン内にStageManagerが見つかりません！");
         }
-
-        // M5StickCはArduinoInputManagerが管理するため、ここでのデバイス検索処理は不要
     }
 
     /// <summary>
@@ -178,7 +206,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        // ゲーム開始時刻の記録（入力遅延用）
+        // ゲーム開始時刻の記録
         if (gameStartTime < 0f)
         {
             gameStartTime = Time.time;
@@ -196,7 +224,6 @@ public class PlayerController : MonoBehaviour
         if (Time.time < gameStartTime + inputDelayAfterStart)
         {
             // 遅延中も前フレームの状態としては更新しておく
-            // 両方のセンサーが閾値を超えているかを判定
             bool active = (norm1 > gripNormalizedThreshold) && (norm2 > gripNormalizedThreshold);
             wasGripInputActiveLastFrame = Input.GetKey(KeyCode.Space) || active;
             return;
@@ -204,10 +231,7 @@ public class PlayerController : MonoBehaviour
 
         // --- 握力（接触）判定ロジック ---
 
-        // 3. 閾値判定 (両方のセンサーが閾値を超えた場合のみ「掴んでいる」とみなす)
         bool isSensorActive = (norm1 > gripNormalizedThreshold) && (norm2 > gripNormalizedThreshold);
-
-        // Spaceキー(デバッグ用) または センサー判定
         bool isRawGripSignalActive = Input.GetKey(KeyCode.Space) || isSensorActive;
 
         // --- チャタリング（瞬間的な信号切れ）対策 ---
@@ -221,10 +245,7 @@ public class PlayerController : MonoBehaviour
             timeSinceGripLow += Time.deltaTime;
         }
 
-        // 猶予期間内なら、信号が切れても「掴み状態」を維持する
         bool isGripInputActive = isRawGripSignalActive || (timeSinceGripLow < gripReleaseGracePeriod);
-
-        // 入力の立ち上がり・立ち下がり検出
         bool gripPressed = isGripInputActive && !wasGripInputActiveLastFrame;
         bool gripReleased = !isGripInputActive && wasGripInputActiveLastFrame;
 
@@ -265,8 +286,7 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// 物理演算タイミングでの処理。スイング中の物理トルク計算、空中姿勢制御、着地処理を行う。
-    /// 直感操作モードでない場合はパワーの自然減衰も適用される。
+    /// 物理演算タイミングでの処理。
     /// </summary>
     void FixedUpdate()
     {
@@ -303,8 +323,7 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// アニメーション更新処理。状態やスイング角度に応じてAnimatorパラメータを設定する。
-    /// キャラクターの向きもここで更新される。
+    /// アニメーション更新処理。
     /// </summary>
     private void LateUpdate()
     {
@@ -317,7 +336,6 @@ public class PlayerController : MonoBehaviour
                 float currentAngle = transform.eulerAngles.z;
                 if (currentAngle > 180f) currentAngle -= 360f;
 
-                // swayMaxAngle を使用して正規化
                 float normalizedTime = Mathf.InverseLerp(swayMaxAngle, -swayMaxAngle, currentAngle);
 
                 if (lastFacingDirection > 0)
@@ -334,12 +352,7 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>
     /// 外部（SessionCalibrationクラス）からキャリブレーション結果を注入するためのメソッド。
-    /// このメソッドが呼ばれることで isCalibrated が true になり、操作が可能になる。
     /// </summary>
-    /// <param name="min1">センサー1の最小値(OFF)</param>
-    /// <param name="max1">センサー1の最大値(ON)</param>
-    /// <param name="min2">センサー2の最小値(OFF)</param>
-    /// <param name="max2">センサー2の最大値(ON)</param>
     public void SetCalibrationValues(float min1, float max1, float min2, float max2)
     {
         this.calibrationMin1 = min1;
@@ -348,15 +361,11 @@ public class PlayerController : MonoBehaviour
         this.calibrationMax2 = max2;
         this.isCalibrated = true;
 
-        // デバッグログで注入された値を確認
         Debug.Log($"<color=cyan>Calibration Applied:</color> Sensor1[{min1:F0}-{max1:F0}], Sensor2[{min2:F0}-{max2:F0}]");
     }
 
-    /// <summary>
-    /// 状態遷移を実行する。デバッグモード時は遷移ログを出力する。
-    /// 同じ状態への遷移は無視される。
-    /// </summary>
-    /// <param name="newState">遷移先の状態</param>
+    // --- State & Direction Helpers ---
+
     private void ChangeState(PlayerState newState)
     {
         if (currentState == newState) return;
@@ -369,11 +378,6 @@ public class PlayerController : MonoBehaviour
         currentState = newState;
     }
 
-    /// <summary>
-    /// キャラクターの向きを速度に基づいて更新する。
-    /// つり革を掴んでいる間やLaunched状態では向きの更新を行わない。
-    /// 一定以上の速度がある場合のみ向きを変更し、Animatorパラメータに反映する。
-    /// </summary>
     private void HandleDirection()
     {
         if (currentStrap != null)
@@ -398,131 +402,191 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// スイング中の物理演算を実行する。
-    /// M5StickCの加速度・ジャイロセンサーの値に基づき、キャラクターの回転とパワー蓄積を行う。
+    /// スイング中の演算を実行するメソッド。
+    /// DirectControlモードでは「勢いステージ制」を採用。
+    /// プレイヤーが中心点(270度)を勢いよく通過するたびにステージが上昇し、
+    /// 発射時のパワーが蓄積される。
     /// </summary>
     private void ExecuteSwayingPhysics()
     {
-        // Arduino（M5StickC）が未接続の場合は、デバッグモードでない限り処理しない
+        // デバイス未接続時は、デバッグモードでない限り処理を中断する
         if ((ArduinoInputManager.instance == null || !ArduinoInputManager.instance.IsConnected) && !debugMode) return;
 
-        // --- 1. デバイスの傾き角度を計算 (加速度センサー利用) ---
+        // =================================================================
+        // 1. デバイスの傾き角度の算出
+        // =================================================================
+
         float inputAngle = 0f;
+        bool isDebugKeyInput = false;
 
         if (debugMode && (ArduinoInputManager.instance == null || !ArduinoInputManager.instance.IsConnected))
         {
-            // デバッグ用: キーボード入力 (-1.0 ~ 1.0) を角度に変換
-            inputAngle = -Input.GetAxisRaw("Horizontal") * swayMaxAngle;
+            // デバッグ用: キーボード入力
+            float input = Input.GetAxisRaw("Horizontal");
+            inputAngle = 270f - (input * swayMaxAngle);
+
+            if (Mathf.Abs(input) > 0.1f)
+            {
+                isDebugKeyInput = true;
+            }
         }
         else
         {
-            // 加速度(ax, ay)から角度を算出
-            // M5StickCを縦持ち（ケーブル下）と仮定。重力方向とのアークタンジェントで角度を求める。
-            Vector3 accel = ArduinoInputManager.RawAccel;
+            // インスペクタで指定された軸設定に基づき、加速度成分を取得
+            Vector3 rawAccel = ArduinoInputManager.RawAccel;
+            float accelX = GetAxisValue(accelHorizontalAxis, rawAccel);
+            float accelY = GetAxisValue(accelVerticalAxis, rawAccel);
 
-            // Atan2(y, x) で角度(ラジアン)を取得し、度数法に変換
-            float calculatedAngle = Mathf.Atan2(accel.x, -accel.y) * Mathf.Rad2Deg;
+            // Atan2(y, x) で角度算出 (右=0, 上=90, 左=180, 下=-90)
+            float calculatedAngle = Mathf.Atan2(accelY, accelX) * Mathf.Rad2Deg;
 
-            // ノイズ対策のため、極端に小さな変化は無視するか、ローパスフィルタをかけるのが望ましいが
-            // ここでは簡易的に現在の値をそのまま採用
+            // 0〜360度に正規化 (下=270度)
+            if (calculatedAngle < 0f)
+            {
+                calculatedAngle += 360f;
+            }
+
             inputAngle = calculatedAngle;
         }
 
-        // ★修正点：メンバ変数へ代入（Warning解消 & 状態保持）
         currentDeviceAngle = inputAngle;
 
-        // --- 2. 直感操作モード (Direct Control) ---
+
+        // =================================================================
+        // 2. 基準角度（270度）からの変位量を計算
+        // =================================================================
+
+        float angleDifference = Mathf.DeltaAngle(270f, inputAngle);
+
+        if (invertDirectControl)
+        {
+            angleDifference *= -1f;
+        }
+
+        // =================================================================
+        // 3. DirectControl (ステージ制スイングロジック)
+        // =================================================================
         if (useDirectControl)
         {
-            // M5の傾きをそのままキャラクターの回転に反映
-            float targetAngle = Mathf.Clamp(inputAngle, -swayMaxAngle, swayMaxAngle);
+            // --- 姿勢制御 ---
+            float clampedDifference = Mathf.Clamp(angleDifference, -swayMaxAngle, swayMaxAngle);
+            float targetAngle = 270f + clampedDifference;
 
-            // 操作反転オプション
-            if (invertDirectControl)
-            {
-                targetAngle *= -1f;
-            }
-
-            // 現在の角度
             float currentZ = transform.eulerAngles.z;
-            if (currentZ > 180f) currentZ -= 360f;
-
-            // スムーズに回転させる
-            float newZ = Mathf.Lerp(currentZ, targetAngle, Time.fixedDeltaTime * directControlSmoothSpeed);
+            float newZ = Mathf.LerpAngle(currentZ, targetAngle, Time.fixedDeltaTime * directControlSmoothSpeed);
             rb.MoveRotation(newZ);
-
             rb.angularVelocity = 0f;
 
-            // 角度の深さに応じてパワーを決定
-            float anglePowerRatio = Mathf.Abs(newZ) / swayMaxAngle;
-            swayPower = anglePowerRatio * maxSwayPower;
+            // --- 勢い（ステージ）判定 ---
+            if (isDebugKeyInput)
+            {
+                currentSwingStage = maxSwingStages;
+                timeSinceLastValidSwing = 0f;
+            }
+            else
+            {
+                if (Mathf.Abs(clampedDifference) > maxAmplitudeInCurrentSwing)
+                {
+                    maxAmplitudeInCurrentSwing = Mathf.Abs(clampedDifference);
+                }
 
+                bool crossedCenter = (Mathf.Sign(lastAngleDifference) != Mathf.Sign(clampedDifference));
+
+                float currentAngularVelocity = 0f;
+                if (ArduinoInputManager.instance != null)
+                {
+                    currentAngularVelocity = Mathf.Abs(GetAxisValue(gyroRotationAxis, ArduinoInputManager.RawGyro));
+                }
+
+                if (crossedCenter)
+                {
+                    bool isValidSwing = (maxAmplitudeInCurrentSwing >= validSwingThresholdAngle) &&
+                                        (currentAngularVelocity >= validSwingThresholdVelocity);
+
+                    if (isValidSwing)
+                    {
+                        if (currentSwingStage < maxSwingStages)
+                        {
+                            currentSwingStage++;
+                            Debug.Log($"<color=cyan>Swing Stage UP!</color> Lv.{currentSwingStage}");
+                        }
+                        timeSinceLastValidSwing = 0f;
+                    }
+                    maxAmplitudeInCurrentSwing = 0f;
+                }
+            }
+
+            if (!isDebugKeyInput)
+            {
+                timeSinceLastValidSwing += Time.deltaTime;
+                if (timeSinceLastValidSwing > stageDecayTime && currentSwingStage > 0)
+                {
+                    currentSwingStage--;
+                    timeSinceLastValidSwing = 0f;
+                    Debug.Log($"<color=orange>Swing Stage Decay...</color> Lv.{currentSwingStage}");
+                }
+            }
+
+            float stageRatio = (float)currentSwingStage / (float)maxSwingStages;
+            swayPower = stageRatio * maxSwayPower;
+            lastAngleDifference = clampedDifference;
             return;
         }
 
-        // --- 3. 物理スイングモード (Physics Control) ---
+        // =================================================================
+        // 4. PhysicsControl（旧物理スイングモード）
+        // =================================================================
 
         float inputTorque = 0f;
         float gyroVelocity = 0f;
 
         if (debugMode && (ArduinoInputManager.instance == null || !ArduinoInputManager.instance.IsConnected))
         {
-            // デバッグ入力
             float horizontalInput = Input.GetAxisRaw("Horizontal");
             if (Mathf.Abs(horizontalInput) > 0.1f)
             {
                 ChangeState(PlayerState.Swaying);
-                // パワー加算
-                float powerIncrease = swayIncreaseRate * Time.fixedDeltaTime;
-                swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
+                inputTorque = horizontalInput * swayForceByAngle;
 
-                inputTorque = horizontalInput * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
+                // 【修正点】キー入力中はパワーを加算する
+                swayPower = Mathf.Min(maxSwayPower, swayPower + swayIncreaseRate * Time.fixedDeltaTime);
+            }
+            else
+            {
+                // 入力がないときは減衰
+                swayPower = Mathf.Max(0, swayPower - swayDecayRate * Time.fixedDeltaTime);
             }
         }
         else
         {
-            // ジャイロセンサーから回転速度(deg/sec)を取得
-            gyroVelocity = ArduinoInputManager.RawGyro.z;
+            gyroVelocity = GetAxisValue(gyroRotationAxis, ArduinoInputManager.RawGyro);
+            float normalizedForce = Mathf.Clamp(angleDifference, -90f, 90f) / 90f;
 
-            // 角度による入力判定 (-1.0 ~ 1.0 に正規化)
-            float normalizedForce = 0f;
-
-            // inputAngle (現在の傾き) を使用して判定
-            float clampedAngle = Mathf.Clamp(inputAngle, -90f, 90f);
-            normalizedForce = clampedAngle / 90f; // -1(左) ~ 1(右)
-
-            // 閾値を超えたらスイング状態へ
             if (Mathf.Abs(normalizedForce) > 0.1f)
             {
                 ChangeState(PlayerState.Swaying);
                 inputTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
 
-            // タイミング判定: 「傾きの方向」と「ジャイロの回転方向」が一致している時＝加速中
             bool isAccelerating = (gyroVelocity > swingVelocityThreshold && normalizedForce > 0) ||
                                   (gyroVelocity < -swingVelocityThreshold && normalizedForce < 0);
-
             if (isAccelerating)
             {
-                // 加速度と傾きの深さに応じてパワーを蓄積
-                float powerIncrease = (Mathf.Abs(normalizedForce) + Mathf.Abs(gyroVelocity * 0.01f) * swayForceByVelocity)
-                                    * swayIncreaseRate
-                                    * Time.fixedDeltaTime;
-
-                swayPower = Mathf.Min(maxSwayPower, swayPower + powerIncrease);
+                swayPower = Mathf.Min(maxSwayPower, swayPower + swayIncreaseRate * Time.fixedDeltaTime);
+            }
+            else
+            {
+                swayPower = Mathf.Max(0, swayPower - swayDecayRate * Time.fixedDeltaTime);
             }
         }
 
-        // 慣性ボーナスの適用
         float inertiaTorque = 0f;
         if (StageManager.CurrentInertia.x != 0)
         {
             inertiaTorque = StageManager.CurrentInertia.x * inertiaSwingBonus;
         }
 
-        // 最終的なトルク適用
         float totalTorque = inputTorque + inertiaTorque;
-
         if (Mathf.Abs(totalTorque) > 0.01f)
         {
             rb.AddTorque(totalTorque);
@@ -530,17 +594,28 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// Idle状態での移動処理（現在は未実装）。将来的な拡張用のプレースホルダー。
+    /// 設定されたM5Axis列挙型に基づいて、Vector3のソースから特定の値を取得・符号反転するヘルパーメソッド。
     /// </summary>
-    private void ExecuteIdleMovement()
+    private float GetAxisValue(M5Axis axis, Vector3 source)
     {
+        switch (axis)
+        {
+            case M5Axis.PlusX: return source.x;
+            case M5Axis.MinusX: return -source.x;
+            case M5Axis.PlusY: return source.y;
+            case M5Axis.MinusY: return -source.y;
+            case M5Axis.PlusZ: return source.z;
+            case M5Axis.MinusZ: return -source.z;
+            default: return 0f;
+        }
     }
+
+    // --- Action Methods ---
 
     /// <summary>
     /// 最も近いつり革を検索して掴む処理。
-    /// 地上から掴む場合はGrabbing状態からSwaying状態へ遷移するコルーチンを開始し、
-    /// 空中再掴みの場合は速度を減衰させて即座にSwaying状態へ移行する。
-    /// HingeJoint2Dを生成してつり革との物理的な接続を確立する。
+    /// つり革を掴むと同時に、StageManagerから現在の状況（混雑率や撃破数）に応じた
+    /// 「開始ステージ（勢いボーナス）」を取得して適用する。
     /// </summary>
     private void GrabNearestStrap()
     {
@@ -558,12 +633,30 @@ public class PlayerController : MonoBehaviour
             currentStrap = nearestStrap;
             rb.constraints = RigidbodyConstraints2D.None;
 
-            // ジョイント生成
             activeHingeJoint = gameObject.AddComponent<HingeJoint2D>();
             activeHingeJoint.connectedBody = nearestStrap.GetComponent<Rigidbody2D>();
             activeHingeJoint.autoConfigureConnectedAnchor = false;
             activeHingeJoint.anchor = transform.InverseTransformPoint(handPoint.position);
             activeHingeJoint.connectedAnchor = nearestStrap.grabPoint.localPosition;
+
+            // --- 開始ステージ（勢いボーナス）の適用 ---
+            if (stageManager != null)
+            {
+                // StageManagerからボーナスステージを計算してもらう
+                int bonusStage = stageManager.GetCalculatedStartStage();
+
+                // 最大値を超えないようにクランプして適用
+                currentSwingStage = Mathf.Clamp(bonusStage, 0, maxSwingStages);
+
+                // 視覚的フィードバック（SwayPower）にも即座に反映
+                float stageRatio = (float)currentSwingStage / (float)maxSwingStages;
+                swayPower = stageRatio * maxSwayPower;
+
+                if (currentSwingStage > 0)
+                {
+                    Debug.Log($"<color=cyan>Bonus Stage Applied:</color> Lv.{currentSwingStage}");
+                }
+            }
 
             if (grabToSwayCoroutine != null) StopCoroutine(grabToSwayCoroutine);
 
@@ -584,10 +677,9 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// つり革を離す処理。状態に応じて発射・落下・Idle状態への遷移を制御する。
-    /// Grabbing状態では単純に離してIdle状態へ移行し、
-    /// Swaying状態では蓄積パワーに応じて発射するか落下するかを判定する。
-    /// 発射時は速度方向への推力を加え、向きを確定させる。
+    /// つり革を離す処理。
+    /// ステージ制に基づき、勢いが足りない場合は落下、十分な場合は発射を実行する。
+    /// DirectControl OFF時は、旧来のSwayPower判定を使用する。
     /// </summary>
     private void ReleaseStrap()
     {
@@ -605,51 +697,112 @@ public class PlayerController : MonoBehaviour
         {
             case PlayerState.Grabbing:
                 ChangeState(PlayerState.Idle);
+                currentSwingStage = 0;
                 swayPower = 0f;
                 break;
 
             case PlayerState.Swaying:
-                if (swayPower < MinLaunchPower)
+
+                // --- 1. 勢い不足の判定 ---
+                bool isPowerInsufficient = false;
+
+                if (useDirectControl)
                 {
-                    if (!IsGrounded())
+                    // DirectControlモード: ステージ数で判定
+                    if (currentSwingStage < minStageToLaunch)
                     {
-                        ChangeState(PlayerState.Launched);
+                        isPowerInsufficient = true;
                     }
-                    else
+                }
+                else
+                {
+                    // 旧物理モード: パワー値で判定
+                    // MinLaunchPower は const float MinLaunchPower = 1f; (内部変数)
+                    if (swayPower < MinLaunchPower)
+                    {
+                        isPowerInsufficient = true;
+                    }
+                }
+
+                if (isPowerInsufficient)
+                {
+                    if (IsGrounded())
                     {
                         ChangeState(PlayerState.Idle);
                     }
+                    else
+                    {
+                        ChangeState(PlayerState.Launched);
+                        rb.angularVelocity = 0f;
+                        rb.velocity *= 0.5f;
+                    }
 
+                    Debug.Log($"<color=orange>Launch Failed...</color> Insufficient Power.");
+                    currentSwingStage = 0;
                     swayPower = 0f;
                     return;
                 }
 
-                Debug.Log($"<color=orange><b>発射！</b></color> 使用パワー: {swayPower.ToString("F1")}");
+                // --- 2. 発射処理 ---
+                Debug.Log($"<color=green><b>Launch!</b></color>");
                 ChangeState(PlayerState.Launched);
                 rb.constraints = RigidbodyConstraints2D.None;
-
                 rb.angularVelocity = 0f;
 
                 Vector2 currentVelocity = rb.velocity.normalized;
                 if (currentVelocity.sqrMagnitude < 0.1f) { currentVelocity = Vector2.up; }
-
                 lastFacingDirection = Mathf.Sign(currentVelocity.x);
-                if (Mathf.Abs(currentVelocity.x) < 0.01f)
+
+
+                // --- 慣性ジャンプブースト判定 ---
+                Vector2 inertia = StageManager.CurrentInertia;
+                bool isBoostApplied = false;
+
+                if (inertia.sqrMagnitude > 0.1f)
                 {
+                    float dot = Vector2.Dot(currentVelocity, inertia.normalized);
+                    if (dot > 0.5f)
+                    {
+                        isBoostApplied = true;
+                    }
                 }
 
-                Vector2 launchBoost = currentVelocity * swayPower * launchMultiplier;
-                rb.AddForce(launchBoost, ForceMode2D.Impulse);
+                if (isBoostApplied)
+                {
+                    // 慣性ブースト適用
+                    Vector2 boostForce = currentVelocity * inertiaJumpBoostStrength;
+                    rb.AddForce(boostForce, ForceMode2D.Impulse);
+                    Debug.Log($"<color=cyan>Inertia Boost applied!</color>");
+                }
+                else
+                {
+                    // 通常発射
+                    float launchForce = 0f;
 
+                    if (useDirectControl)
+                    {
+                        // DirectControl: ステージ数ベース
+                        launchForce = currentSwingStage * powerPerStage * launchMultiplier;
+                    }
+                    else
+                    {
+                        // 旧物理モード: パワー値ベース
+                        launchForce = swayPower * launchMultiplier;
+                    }
+
+                    Vector2 launchVector = currentVelocity * launchForce;
+                    rb.AddForce(launchVector, ForceMode2D.Impulse);
+                }
+
+                currentSwingStage = 0;
                 swayPower = 0f;
+                maxAmplitudeInCurrentSwing = 0f;
                 break;
         }
     }
 
     /// <summary>
     /// Grabbing状態からSwaying状態への遷移を制御するコルーチン。
-    /// 掴みアニメーションの再生時間分待機してから状態を切り替える。
-    /// 待機中に離脱した場合は遷移をキャンセルする。
     /// </summary>
     private IEnumerator TransitionToSwayingRoutine()
     {
@@ -664,9 +817,7 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>
     /// NPCとの衝突時に呼び出される。
-    /// スイング中の場合はSwayPowerを威力に加算してNPCに衝突威力を伝達する。
     /// </summary>
-    /// <param name="other">衝突したNPCのCollider2D</param>
     public void HandleNpcCollision(Collider2D other)
     {
         if (other.gameObject.CompareTag("NPC"))
@@ -690,23 +841,14 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// 接地判定を行う。feetPositionから下方向へレイキャストを飛ばし、groundLayerに該当する地面を検出する。
-    /// Sceneビューでレイを可視化し、ヒット時は緑、ミス時は赤で描画される。
+    /// 接地判定を行う。
     /// </summary>
-    /// <returns>地面に接地している場合はtrue、空中の場合はfalse</returns>
     private bool IsGrounded()
     {
         RaycastHit2D hit = Physics2D.Raycast(feetPosition.position, Vector2.down, groundCheckDistance, groundLayer);
 
         Color rayColor = hit ? Color.green : Color.red;
         Debug.DrawRay(feetPosition.position, Vector2.down * groundCheckDistance, rayColor);
-
-        if (hit.collider != null)
-        {
-        }
-        else
-        {
-        }
 
         return hit.collider != null;
     }

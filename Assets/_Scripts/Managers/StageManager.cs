@@ -41,28 +41,47 @@ public class StationEvent
 }
 
 /// <summary>
+/// 混雑率に応じた開始ステージボーナスの設定構造体。
+/// 指定した範囲内の混雑率であれば、指定したステージからスイングを開始する。
+/// </summary>
+[System.Serializable]
+public struct CongestionBonusSettings
+{
+    [Tooltip("この設定が適用される最小混雑率 (%)")]
+    public float minRate;
+    [Tooltip("この設定が適用される最大混雑率 (%)")]
+    public float maxRate;
+    [Tooltip("適用される開始ステージ")]
+    public int startStage;
+}
+
+/// <summary>
+/// NPC撃破数に応じた開始ステージボーナスの設定構造体。
+/// 指定した数以上倒していれば、指定したステージからスイングを開始する。
+/// </summary>
+[System.Serializable]
+public struct DefeatedBonusSettings
+{
+    [Tooltip("この設定が適用される最低撃破数")]
+    public int minDefeatedCount;
+    [Tooltip("適用される開始ステージ")]
+    public int startStage;
+}
+
+/// <summary>
 /// ステージ全体の進行を管理するマネージャー。
-/// 駅イベントの制御、混雑率の計算、慣性の管理、UIの更新を担当する。
+/// 駅イベントの制御、混雑率の計算、慣性の管理、UIの更新に加え、
+/// プレイヤーへの「勢いボーナス」の計算やオーバーロード（混雑限界）の監視を担当する。
 /// </summary>
 [RequireComponent(typeof(AudioSource))]
 public class StageManager : MonoBehaviour
 {
     /// <summary>
     /// ゲーム全体の進行状態を表す列挙型。
-    /// チュートリアル、プレイ中、ポーズ、ゲームオーバー、ステージクリアの5状態を管理する。
     /// </summary>
     public enum GameState { Tutorial, Playing, Paused, GameOver, StageClear }
 
-    /// <summary>
-    /// 現在のゲーム状態。
-    /// 外部から参照可能だが、変更はこのクラス内でのみ行う。
-    /// </summary>
     public GameState CurrentState { get; private set; }
-
-    /// <summary>
-    /// 現在の慣性力。
-    /// 加速・減速時にプレイヤーや敵NPCに影響を与えるベクトル。
-    /// </summary>
     public static Vector2 CurrentInertia { get; private set; }
 
     [Header("慣性設定")]
@@ -72,12 +91,26 @@ public class StageManager : MonoBehaviour
     [Header("混雑率設定")]
     [Tooltip("初期の混雑率")]
     public float initialCongestionRate = 150f;
-
     [Tooltip("ゲームオーバーになる混雑率")]
     public float maxCongestionRate = 300f;
-
     [Tooltip("NPCが1人減るごとに、何%混雑率が下がるか")]
     public float rateDecreasePerNpc = 1.5f;
+
+    [Header("▼ 勢いボーナス設定 (混雑率)")]
+    [Tooltip("混雑率に応じた開始ステージボーナスのリスト。上から順に評価されるため、範囲が被らないよう設定推奨。")]
+    public List<CongestionBonusSettings> congestionBonusList;
+
+    [Header("▼ 勢いボーナス設定 (撃破数)")]
+    [Tooltip("撃破数に応じた開始ステージボーナスのリスト。条件を満たす最大の設定が適用される。")]
+    public List<DefeatedBonusSettings> defeatedBonusList;
+
+    [Header("▼ オーバーロード設定 (混雑限界)")]
+    [Tooltip("この混雑率を超えると「危険状態」とみなし、タイマーを作動させる")]
+    public float overloadCongestionThreshold = 250f;
+    [Tooltip("危険状態がこの秒数続くとゲームオーバーになる")]
+    public float overloadDurationToGameOver = 5.0f;
+    [Tooltip("現在オーバーロード中かどうかを表示するテキスト (UI用)")]
+    public TextMeshProUGUI overloadWarningText;
 
     [Header("ステージ設定")]
     [Tooltip("このステージの駅イベントリスト。順番に設定してください。")]
@@ -95,55 +128,32 @@ public class StageManager : MonoBehaviour
     public TextMeshProUGUI defeatedNpcCountText;
 
     [Header("UI設定 (ステータス表示オブジェクト)")]
-    [Tooltip("「減速中」の画像が含まれるゲームオブジェクト")]
     public GameObject statusObjDecelerating;
-
-    [Tooltip("「停車中」の画像が含まれるゲームオブジェクト")]
     public GameObject statusObjStopped;
-
-    [Tooltip("「加速中」の画像が含まれるゲームオブジェクト")]
     public GameObject statusObjAccelerating;
 
     [Header("駅進捗UI設定")]
-    [Tooltip("駅の位置を示す黄色いボールのImageコンポーネント")]
     public Image yellowBall;
-
-    [Tooltip("5つの駅アイコンのRectTransformを順番に設定")]
     public List<RectTransform> stationIconPositions;
-
-    [Tooltip("YellowBallが点滅する間隔（秒）")]
     public float blinkInterval = 0.5f;
 
     [Header("駅到着演出の設定")]
-    [Tooltip("駅到着時の効果音")]
     public SoundEffect arrivalSound;
-
-    [Tooltip("「減速中」表示から効果音・スポーンまでの時間")]
     public float delayBeforeSpawn = 2.0f;
-
-    [Tooltip("NPCがスポーンしてから「加速中」表示までの停車時間")]
     public float stationStopTime = 5.0f;
-
-    [Tooltip("「加速中」表示から「走行中」表示までの時間")]
     public float accelerationTime = 3.0f;
 
     [Header("最終走行(クリア)の設定")]
-    [Tooltip("最後の駅から終点に到着するまでの時間(秒)")]
     public float finalRunDuration = 20f;
-
-    [Tooltip("終点到着時の効果音")]
     public SoundEffect finalArrivalSound;
 
     [Header("効果音設定")]
-    [Tooltip("NPCを倒した時の効果音")]
     public SoundEffect npcDefeatSound;
 
     [Header("背景")]
-    [Tooltip("シーンのParallaxControllerへの参照")]
     public ParallaxController parallaxController;
 
     [Header("ドア")]
-    [Tooltip("シーンのDoorスクリプトへの参照")]
     public DoorManager doorController;
 
     private AudioSource audioSource;
@@ -152,42 +162,29 @@ public class StageManager : MonoBehaviour
     private int currentStationIndex;
     private Coroutine blinkingEffectCoroutine;
 
-    /// <summary>
-    /// 列車の運行状態を表すステータス表示の種類。
-    /// None、減速中、停車中、加速中の4状態を管理する。
-    /// </summary>
+    // オーバーロード監視用タイマー
+    private float currentOverloadTimer = 0f;
+
     private enum StatusDisplayType { None, Decelerating, Stopped, Accelerating }
 
-    /// <summary>
-    /// Awakeで実行される初期化処理。
-    /// AudioSourceコンポーネントの参照を取得する。
-    /// </summary>
     void Awake()
     {
         audioSource = GetComponent<AudioSource>();
     }
 
-    /// <summary>
-    /// Startで実行される初期化処理。
-    /// 【修正版】いきなりチュートリアルは出さず、UIの非表示初期化と変数のセットアップだけ行う。
-    /// キャリブレーションが動くよう、TimeScaleは1にしておく。
-    /// </summary>
     void Start()
     {
-        // まだチュートリアル状態にはしない（キャリブレーション待ち）
-
-        // 全パネルを一旦非表示
-        if (tutorialPanel != null) tutorialPanel.SetActive(false); // ← falseに変更
+        if (tutorialPanel != null) tutorialPanel.SetActive(false);
         if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
         if (clearPanel != null) clearPanel.SetActive(false);
+        if (overloadWarningText != null) overloadWarningText.text = "";
 
         SetStatusDisplay(StatusDisplayType.Stopped);
 
         if (stationNameText != null) stationNameText.text = "";
         CurrentInertia = Vector2.zero;
 
-        // キャリブレーションのコルーチンを動かすために、時間は動かしておく
         Time.timeScale = 1f;
 
         UpdateCongestionUI();
@@ -196,25 +193,21 @@ public class StageManager : MonoBehaviour
         UpdateDefeatedNpcCountUI();
     }
 
-    /// <summary>
-    /// キャリブレーション完了後に呼ばれる。
-    /// チュートリアルを表示し、ゲーム時間を止めてプレイヤーの開始入力を待つ。
-    /// </summary>
     public void ShowTutorial()
     {
         CurrentState = GameState.Tutorial;
         if (tutorialPanel != null) tutorialPanel.SetActive(true);
-
-        // ここで初めて時間を止める（プレイヤーに説明を読ませるため）
         Time.timeScale = 0f;
     }
 
-    /// <summary>
-    /// 毎フレーム実行される更新処理。
-    /// プレイ中またはポーズ中にEscキーでポーズ切り替えを受け付ける。
-    /// </summary>
     void Update()
     {
+        if (CurrentState == GameState.Playing)
+        {
+            // オーバーロード（混雑しすぎ）チェック
+            CheckOverloadStatus();
+        }
+
         if (CurrentState == GameState.Playing || CurrentState == GameState.Paused)
         {
             if (Input.GetKeyDown(KeyCode.Escape))
@@ -225,10 +218,82 @@ public class StageManager : MonoBehaviour
     }
 
     /// <summary>
-    /// ステータス表示を切り替える。
-    /// 減速中、停車中、加速中、非表示の4つの状態を管理し、該当するUIオブジェクトのみをアクティブにする。
+    /// 現在の混雑率と撃破数に基づいて、プレイヤーに付与する開始ステージを計算する。
+    /// 混雑ボーナスと撃破ボーナスのうち、高い方の値を採用する。
+    /// PlayerControllerからつり革を掴んだ瞬間に呼び出される想定。
     /// </summary>
-    /// <param name="type">表示するステータスの種類</param>
+    /// <returns>適用すべき開始ステージ (0以上の整数)</returns>
+    public int GetCalculatedStartStage()
+    {
+        int congestionBonus = 0;
+        int defeatedBonus = 0;
+
+        // 1. 混雑率によるボーナス計算
+        foreach (var setting in congestionBonusList)
+        {
+            if (currentCongestionRate >= setting.minRate && currentCongestionRate < setting.maxRate)
+            {
+                // 条件に合致する設定が見つかったら適用（上書き）
+                congestionBonus = setting.startStage;
+                // リストの下にある設定ほど優先度が高い設計にするなら break しないが、
+                // 基本的には範囲指定なので最初に見つかったものを採用して break
+                break;
+            }
+        }
+
+        // 2. 撃破数によるボーナス計算
+        // 撃破数が多いほど有利になるよう、条件を満たす最大値を探索
+        foreach (var setting in defeatedBonusList)
+        {
+            if (defeatedNpcCount >= setting.minDefeatedCount)
+            {
+                // より高いボーナスがあれば更新（リストが昇順でなくても最大を取れるようにMathf.Max）
+                defeatedBonus = Mathf.Max(defeatedBonus, setting.startStage);
+            }
+        }
+
+        // 両方のボーナスのうち、高い方を採用して返す
+        return Mathf.Max(congestionBonus, defeatedBonus);
+    }
+
+    /// <summary>
+    /// 混雑率が危険域を超えているかを監視し、継続している場合はゲームオーバーにする。
+    /// 警告UIの更新も行う。
+    /// </summary>
+    private void CheckOverloadStatus()
+    {
+        if (currentCongestionRate >= overloadCongestionThreshold)
+        {
+            currentOverloadTimer += Time.deltaTime;
+
+            float remainingTime = Mathf.Max(0, overloadDurationToGameOver - currentOverloadTimer);
+
+            if (overloadWarningText != null)
+            {
+                overloadWarningText.text = $"<color=red>DANGER! {remainingTime:F1}</color>";
+                overloadWarningText.gameObject.SetActive(true);
+            }
+
+            if (currentOverloadTimer >= overloadDurationToGameOver)
+            {
+                Debug.Log("Overload Game Over Triggered.");
+                TriggerGameOver();
+            }
+        }
+        else
+        {
+            // 閾値を下回ったらタイマーリセット
+            if (currentOverloadTimer > 0f)
+            {
+                currentOverloadTimer = 0f;
+                if (overloadWarningText != null)
+                {
+                    overloadWarningText.gameObject.SetActive(false);
+                }
+            }
+        }
+    }
+
     private void SetStatusDisplay(StatusDisplayType type)
     {
         if (statusObjDecelerating != null) statusObjDecelerating.SetActive(false);
@@ -251,11 +316,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// ゲームを開始する。
-    /// チュートリアルパネルを非表示にし、TimeScaleを1に戻してゲームを進行させる。
-    /// 初期混雑率を設定し、NPCをスポーンさせた後、ステージ進行コルーチンを開始する。
-    /// </summary>
     public void StartGame()
     {
         CurrentState = GameState.Playing;
@@ -276,10 +336,6 @@ public class StageManager : MonoBehaviour
         StartCoroutine(StageProgressionCoroutine());
     }
 
-    /// <summary>
-    /// NPCが倒されたときに呼び出される。
-    /// 混雑率を減少させ、倒したNPCのカウントを増やして各UIを更新する。
-    /// </summary>
     public void OnNpcDefeated()
     {
         currentCongestionRate -= rateDecreasePerNpc;
@@ -289,10 +345,6 @@ public class StageManager : MonoBehaviour
         UpdateDefeatedNpcCountUI();
     }
 
-    /// <summary>
-    /// 倒したNPCの数をUIに反映する。
-    /// defeatedNpcCountTextがnullでない場合のみテキストを更新する。
-    /// </summary>
     private void UpdateDefeatedNpcCountUI()
     {
         if (defeatedNpcCountText != null)
@@ -301,10 +353,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 混雑率をUIに反映する。
-    /// 小数点以下を切り上げて整数値として表示する。
-    /// </summary>
     private void UpdateCongestionUI()
     {
         if (congestionRateText != null)
@@ -313,43 +361,27 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// ゲームオーバー処理を実行する。
-    /// ゲーム状態をGameOverに変更し、TimeScaleを0にしてゲームを停止する。
-    /// ゲームオーバーパネルを表示する。
-    /// </summary>
     private void TriggerGameOver()
     {
         CurrentState = GameState.GameOver;
         Time.timeScale = 0f;
         if (gameOverPanel != null) gameOverPanel.SetActive(true);
+        if (overloadWarningText != null) overloadWarningText.gameObject.SetActive(false);
         Debug.Log("ゲームオーバー！");
     }
 
-    /// <summary>
-    /// ステージをリトライする。
-    /// TimeScaleを1に戻し、現在のシーンをフェード付きで再読み込みする。
-    /// </summary>
     public void RetryStage()
     {
         Time.timeScale = 1f;
         SceneFader.instance.LoadSceneWithFade(SceneManager.GetActiveScene().name);
     }
 
-    /// <summary>
-    /// タイトル画面に戻る。
-    /// TimeScaleを1に戻し、タイトルシーンをフェード付きで読み込む。
-    /// </summary>
     public void ReturnToTitle()
     {
         Time.timeScale = 1f;
         SceneFader.instance.LoadSceneWithFade("TitleScreen");
     }
 
-    /// <summary>
-    /// ステージ全体の進行を制御するコルーチン。
-    /// 各駅への到着と出発を順番に処理し、最後に終点への走行とクリア処理を実行する。
-    /// </summary>
     private IEnumerator StageProgressionCoroutine()
     {
         SetStatusDisplay(StatusDisplayType.None);
@@ -412,12 +444,6 @@ public class StageManager : MonoBehaviour
         TriggerStageClear();
     }
 
-    /// <summary>
-    /// 駅への到着から出発までの一連のシーケンスを処理するコルーチン。
-    /// 減速、停車、NPCスポーン、加速の各フェーズを順番に実行する。
-    /// 混雑率が最大値を超えた場合はゲームオーバーにする。
-    /// </summary>
-    /// <param name="station">到着する駅のイベントデータ</param>
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
         if (parallaxController != null)
@@ -474,10 +500,6 @@ public class StageManager : MonoBehaviour
         CurrentInertia = Vector2.zero;
     }
 
-    /// <summary>
-    /// ステージクリア処理を実行する。
-    /// ゲーム状態をStageCllearに変更し、停車中表示に切り替えてクリアパネルを表示する。
-    /// </summary>
     private void TriggerStageClear()
     {
         CurrentState = GameState.StageClear;
@@ -489,11 +511,6 @@ public class StageManager : MonoBehaviour
         Debug.Log("ステージクリア！");
     }
 
-    /// <summary>
-    /// ポーズ状態を切り替える。
-    /// ポーズ中であればゲームを再開し、プレイ中であればポーズする。
-    /// TimeScaleとポーズメニューパネルの表示状態を適切に更新する。
-    /// </summary>
     public void TogglePause()
     {
         if (CurrentState == GameState.Paused)
@@ -510,10 +527,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 黄色いボールの点滅を開始する。
-    /// すでに点滅中の場合は既存のコルーチンを停止してから新しく開始する。
-    /// </summary>
     private void StartBlinking()
     {
         if (blinkingEffectCoroutine != null)
@@ -523,10 +536,6 @@ public class StageManager : MonoBehaviour
         blinkingEffectCoroutine = StartCoroutine(BlinkingCoroutine());
     }
 
-    /// <summary>
-    /// 黄色いボールの点滅を停止する。
-    /// コルーチンを停止し、ボールを表示状態にする。
-    /// </summary>
     private void StopBlinking()
     {
         if (blinkingEffectCoroutine != null)
@@ -540,10 +549,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// NPC撃破時の効果音を再生する。
-    /// NPCManagerなど外部システムから呼び出される想定。
-    /// </summary>
     public void PlayNpcDefeatSound()
     {
         if (npcDefeatSound != null && npcDefeatSound.clip != null)
@@ -552,10 +557,6 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 黄色いボールを点滅させるコルーチン。
-    /// 指定された間隔で表示と非表示を繰り返す。
-    /// </summary>
     private IEnumerator BlinkingCoroutine()
     {
         while (true)
