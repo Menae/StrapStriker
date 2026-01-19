@@ -233,5 +233,7 @@ MonoBehaviour:
   recoveryTime: 5
   timeBeforeFade: 2
   fadeDuration: 1
-  heavyResistanceThreshold: 15
-  bounceBackMultiplier: 1.1
+  impactResistanceThreshold: 15
+  bounceBackMultiplier: 1.3
+  flinchForce: 2
+  breakGuardMultiplier: 1.5

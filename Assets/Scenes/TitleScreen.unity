@@ -2558,7 +2558,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   fallbackPortName: COM7
-  baudRate: 9600
+  baudRate: 115200
   smoothingFactor: 0.2
 --- !u!4 &2085190142
 Transform:

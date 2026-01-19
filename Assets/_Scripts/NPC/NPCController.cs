@@ -1,27 +1,20 @@
 ﻿using System.Collections;
 using UnityEngine;
 
-/// <summary>
-/// NPCの基底クラス。
-/// 共通の物理挙動、パーソナルスペース、消滅処理を管理する。
-/// 特殊な敵を作る場合はこのクラスを継承する。
-/// </summary>
 public class NPCController : MonoBehaviour
 {
-    // 自身のタイプ（Inspectorで設定、または継承先で指定）
     [Header("NPC設定")]
     public NPCType npcType = NPCType.Normal;
 
-    protected enum NPCState
-    {
-        Idle,       // 通常時
-        KnockedDown // 座る、または倒れている状態
-    }
+    protected enum NPCState { Idle, KnockedDown }
     protected NPCState currentState = NPCState.Idle;
 
     [Header("パーソナルスペースAI設定")]
     public float personalSpaceRadius = 0.5f;
     public float separationForce = 1.0f;
+
+    // GC Allocationを防ぐためのバッファ
+    private readonly Collider2D[] _nearCollidersBuffer = new Collider2D[10];
 
     [Header("物理リアクション設定")]
     public float satThreshold = 5.0f;
@@ -32,32 +25,36 @@ public class NPCController : MonoBehaviour
     public float timeBeforeFade = 2.0f;
     public float fadeDuration = 1.0f;
 
-    // protectedに変更（継承先で使えるようにする）
     protected Rigidbody2D rb;
     protected Collider2D col;
-    protected bool isActivated = false;
     protected SpriteRenderer visualSprite;
     protected Animator animator;
     protected StageManager stageManager;
+    protected bool isActivated = false;
+
+    // Animatorパラメータのハッシュ化
+    protected static readonly int AnimHashFallen = Animator.StringToHash("Fallen");
+    protected static readonly int AnimHashSat = Animator.StringToHash("Sat");
 
     protected virtual void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         col = GetComponent<Collider2D>();
-        rb.centerOfMass = new Vector2(0, 0.5f);
         visualSprite = GetComponentInChildren<SpriteRenderer>();
         animator = GetComponentInChildren<Animator>();
+
+        if (rb != null) rb.centerOfMass = new Vector2(0, 0.5f);
     }
 
     protected virtual void OnDisable()
     {
         StopAllCoroutines();
         currentState = NPCState.Idle;
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-
+        // 色のリセット処理
         if (visualSprite != null)
         {
-            visualSprite.color = new Color(visualSprite.color.r, visualSprite.color.g, visualSprite.color.b, 1f);
+            var c = visualSprite.color;
+            visualSprite.color = new Color(c.r, c.g, c.b, 1f);
         }
     }
 
@@ -65,30 +62,46 @@ public class NPCController : MonoBehaviour
     {
         if (currentState == NPCState.Idle && isActivated)
         {
-            int layerMask = LayerMask.GetMask("NPC");
-            Collider2D[] nearColliders = Physics2D.OverlapCircleAll(transform.position, personalSpaceRadius, layerMask);
+            PerformSeparation();
+        }
+    }
 
-            Vector2 totalSeparationForce = Vector2.zero;
+    // 分離ロジックをメソッド抽出
+    private void PerformSeparation()
+    {
+        int layerMask = LayerMask.GetMask("NPC");
 
-            foreach (var col in nearColliders)
-            {
-                if (col.gameObject == this.gameObject) continue;
+        // NonAllocを使用してGCを回避
+        int count = Physics2D.OverlapCircleNonAlloc(transform.position, personalSpaceRadius, _nearCollidersBuffer, layerMask);
 
-                float distance = Vector2.Distance(transform.position, col.transform.position);
-                float strength = 1.0f - (distance / personalSpaceRadius);
-                Vector2 pushDirection = (transform.position - col.transform.position).normalized;
-                totalSeparationForce += pushDirection * strength;
-            }
+        if (count == 0) return;
 
-            totalSeparationForce.y = 0;
+        Vector2 totalSeparationForce = Vector2.zero;
+        int separationCount = 0;
+
+        for (int i = 0; i < count; i++)
+        {
+            var otherCol = _nearCollidersBuffer[i];
+            if (otherCol.gameObject == gameObject) continue;
+
+            float distance = Vector2.Distance(transform.position, otherCol.transform.position);
+            // ゼロ除算対策
+            if (distance <= Mathf.Epsilon) continue;
+
+            float strength = 1.0f - (distance / personalSpaceRadius);
+            Vector2 pushDirection = (transform.position - otherCol.transform.position).normalized;
+            totalSeparationForce += pushDirection * strength;
+            separationCount++;
+        }
+
+        if (separationCount > 0)
+        {
+            totalSeparationForce.y = 0; // 横軸のみに制限
             rb.AddForce(totalSeparationForce * separationForce);
         }
     }
 
-    public void SetStageManager(StageManager manager)
-    {
-        stageManager = manager;
-    }
+    public void SetStageManager(StageManager manager) => stageManager = manager;
 
     public void Activate()
     {
@@ -101,8 +114,8 @@ public class NPCController : MonoBehaviour
 
     public void Deactivate()
     {
+        // 既に倒れている場合は物理演算を残す等の判断が必要ならここに記述
         if (currentState == NPCState.KnockedDown) return;
-        if (!isActivated) return;
 
         isActivated = false;
         rb.simulated = false;
@@ -111,37 +124,39 @@ public class NPCController : MonoBehaviour
     }
 
     /// <summary>
-    /// 衝撃を受けた際の処理。
-    /// virtual にすることで、継承先で独自のリアクション（爆発、カウンター等）を実装可能にする。
+    /// 衝撃処理
+    /// 呼び出し元で計算済みの「最終的な衝撃ベクトル」と「加害者」を受け取る
     /// </summary>
-    public virtual void TakeImpact(Vector2 playerVelocity, float knockbackMultiplier)
+    public virtual void TakeImpact(Vector2 impactForce, GameObject instigator)
     {
         if (currentState == NPCState.KnockedDown) return;
 
-        Vector2 forceToApply = playerVelocity * knockbackMultiplier;
-        float impactMagnitude = forceToApply.magnitude;
-        rb.AddForce(forceToApply, ForceMode2D.Impulse);
-
-        // Debug.Log("NPCが " + impactMagnitude + " の力で衝撃を受けた！");
+        float impactMagnitude = impactForce.magnitude;
+        rb.AddForce(impactForce, ForceMode2D.Impulse);
 
         if (impactMagnitude > fallenThreshold)
         {
-            if (stageManager != null)
-            {
-                stageManager.PlayNpcDefeatSound();
-                stageManager.OnNpcDefeated();
-            }
-
-            currentState = NPCState.KnockedDown;
-            animator.SetTrigger("Fallen");
-            StartCoroutine(FadeOutAndDespawnRoutine());
+            HandleDefeat();
         }
         else if (impactMagnitude > satThreshold)
         {
             currentState = NPCState.KnockedDown;
-            animator.SetTrigger("Sat");
+            animator.SetTrigger(AnimHashSat);
             StartCoroutine(SatRecoveryRoutine());
         }
+    }
+
+    protected void HandleDefeat()
+    {
+        if (stageManager != null)
+        {
+            stageManager.PlayNpcDefeatSound();
+            stageManager.OnNpcDefeated();
+        }
+
+        currentState = NPCState.KnockedDown;
+        animator.SetTrigger(AnimHashFallen);
+        StartCoroutine(FadeOutAndDespawnRoutine());
     }
 
     protected IEnumerator SatRecoveryRoutine()
@@ -152,13 +167,11 @@ public class NPCController : MonoBehaviour
 
     protected IEnumerator FadeOutAndDespawnRoutine()
     {
-        currentState = NPCState.KnockedDown;
-        // Debug.Log("NPCが消滅シーケンスを開始！");
-
         yield return new WaitForSeconds(timeBeforeFade);
 
         float timer = 0f;
         Color startColor = visualSprite.color;
+
         while (timer < fadeDuration)
         {
             timer += Time.deltaTime;
@@ -167,7 +180,6 @@ public class NPCController : MonoBehaviour
             yield return null;
         }
 
-        // 返却時に自身のタイプを指定する
         NPCPool.instance.ReturnNPC(this.gameObject, this.npcType);
     }
 }

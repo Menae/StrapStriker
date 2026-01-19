@@ -845,26 +845,35 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// NPCとの衝突時に呼び出される。
+    /// NPCとの衝突時に呼び出される処理。
+    /// 自身の速度とスイングパワーを物理的な衝撃力に変換し、NPCへ伝達する。
     /// </summary>
     public void HandleNpcCollision(Collider2D other)
     {
+        // Tag比較は残すが、実務的にはLayerMatrixでの制御が望ましい
         if (other.gameObject.CompareTag("NPC"))
         {
             NPCController npc = other.gameObject.GetComponentInParent<NPCController>();
 
             if (npc != null)
             {
-                Vector2 impactVelocity = rb.velocity;
+                // 現在の物理速度をベースにする
+                Vector2 currentVelocity = rb.velocity;
 
+                // スイング中（攻撃判定中）なら、蓄積されたSwayPowerを速度ベクトルに上乗せする
                 if (currentState == PlayerState.Swaying)
                 {
-                    Vector2 powerBonus = impactVelocity.normalized * swayPower * swayImpactPowerBonus;
-                    impactVelocity += powerBonus;
-                    Debug.Log($"<color=red>スイングインパクト！</color> パワーボーナス: {powerBonus.magnitude}");
+                    Vector2 powerBonus = currentVelocity.normalized * swayPower * swayImpactPowerBonus;
+                    currentVelocity += powerBonus;
+                    Debug.Log($"<color=red>Swing Impact!</color> PowerBonus: {powerBonus.magnitude:F1}");
                 }
 
-                npc.TakeImpact(impactVelocity, knockbackMultiplier);
+                // 1. 速度(m/s) × 倍率(Mass想定) = 衝撃力(Impulse) をここで確定
+                Vector2 finalImpactForce = currentVelocity * knockbackMultiplier;
+
+                // 2. 衝撃力と加害者を渡す
+                //    これによりNPC側は「誰に殴られたか」を知り、カウンター等の判定を行える
+                npc.TakeImpact(finalImpactForce, this.gameObject);
             }
         }
     }
@@ -895,23 +904,30 @@ public class PlayerController : MonoBehaviour
 
         foreach (var hitCollider in hitColliders)
         {
-            // 自分自身は除外
+            // 自分自身は巻き込まない
             if (hitCollider.gameObject == this.gameObject) continue;
 
-            NPCController npc = hitCollider.GetComponent<NPCController>();
-            if (npc != null)
+            // 【修正】TryGetComponentで安全に取得
+            if (hitCollider.TryGetComponent<NPCController>(out var npc))
             {
-                // 爆心地からの方向ベクトル
+                // 爆心地からの方向ベクトル算出
                 Vector2 direction = (npc.transform.position - transform.position).normalized;
-                // 少し上向きに飛ばすと気持ちいい
+                // 少し上向きに飛ばす補正（吹き飛びの気持ちよさ重視）
                 direction += Vector2.up * 0.5f;
 
-                npc.TakeImpact(direction.normalized * 10f, batteryExplosionImpactMultiplier);
+                // すべて掛け合わせた最終的な爆発力(Impulse)を渡す
+                // 基礎威力(10f) * 倍率 * 方向
+                Vector2 explosionForce = direction.normalized * 10f * batteryExplosionImpactMultiplier;
+
+                npc.TakeImpact(explosionForce, this.gameObject);
             }
         }
 
-        // 2. プレイヤー自身を前方に吹き飛ばす
-        Vector2 boostDir = new Vector2(lastFacingDirection, 0.5f).normalized;
+        // 2. プレイヤー自身を前方に吹き飛ばす（反動移動）
+        // 向きが0（停止中）の場合は右(1)をデフォルトとする
+        float boostDirectionX = (lastFacingDirection != 0) ? lastFacingDirection : 1f;
+        Vector2 boostDir = new Vector2(boostDirectionX, 0.5f).normalized;
+
         rb.AddForce(boostDir * batteryExplosionSelfForce, ForceMode2D.Impulse);
 
         // 3. エフェクト生成
@@ -920,6 +936,7 @@ public class PlayerController : MonoBehaviour
             Instantiate(batteryExplosionEffect, transform.position, Quaternion.identity);
         }
 
+        // 爆発の勢いでLaunched状態へ移行
         ChangeState(PlayerState.Launched);
     }
 

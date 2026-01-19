@@ -1,59 +1,68 @@
 ﻿using UnityEngine;
 
-/// <summary>
-/// 質量の高い（デブ）NPCのコントローラー。
-/// 一定以下の衝撃は無効化し、プレイヤーを弾き飛ばすカウンター動作を行う。
-/// </summary>
 public class HeavyNPCController : NPCController
 {
-    [Header("弾き返し設定")]
-    [Tooltip("この値以下の衝撃なら弾き返す（通常の倒れる閾値より高く設定する）")]
-    public float heavyResistanceThreshold = 15.0f;
-    [Tooltip("プレイヤーを弾き返す力の倍率")]
+    [Header("重量級設定")]
+    [Tooltip("この衝撃力(Impulse)未満は耐える")]
+    public float impactResistanceThreshold = 20.0f;
+
+    [Tooltip("カウンターの強さ")]
     public float bounceBackMultiplier = 1.5f;
+
+    [Tooltip("耐えた時のよろめき力")]
+    public float flinchForce = 2.0f;
+
+    [Tooltip("ガードブレイク時の吹き飛び倍率")]
+    public float breakGuardMultiplier = 1.5f;
+
+    // Animatorハッシュ（派生クラス用）
+    private static readonly int AnimHashEndure = Animator.StringToHash("Endure");
 
     protected override void Awake()
     {
         base.Awake();
         npcType = NPCType.Heavy;
-
-        // 質量を重くして物理的にも吹っ飛びにくくする
-        if (rb != null) rb.mass = 3.0f;
     }
 
-    public override void TakeImpact(Vector2 playerVelocity, float knockbackMultiplier)
+    /// <summary>
+    /// 衝撃処理のオーバーライド
+    /// </summary>
+    /// <param name="impactForce">入力された衝撃インパルス</param>
+    /// <param name="instigator">衝撃を与えたオブジェクト（プレイヤー等）</param>
+    public override void TakeImpact(Vector2 impactForce, GameObject instigator)
     {
         if (currentState == NPCState.KnockedDown) return;
 
-        // 衝撃力を計算
-        Vector2 forceToApply = playerVelocity * knockbackMultiplier;
-        float impactMagnitude = forceToApply.magnitude;
+        float impactMagnitude = impactForce.magnitude;
 
-        // 閾値チェック：衝撃が弱すぎる場合
-        if (impactMagnitude < heavyResistanceThreshold)
+        // --- 1. スーパーアーマー判定 (Guard & Counter) ---
+        if (impactMagnitude < impactResistanceThreshold)
         {
-            // 弾き返し処理
-            // プレイヤーを探して逆方向の力を加える
-            PlayerController player = FindObjectOfType<PlayerController>();
-            if (player != null)
+            // よろめき演出
+            if (rb != null)
             {
-                Rigidbody2D playerRb = player.GetComponent<Rigidbody2D>();
-                if (playerRb != null)
-                {
-                    // 入ってきたベクトルを反転させて返す
-                    Vector2 bounceForce = -playerVelocity * bounceBackMultiplier;
-                    playerRb.AddForce(bounceForce, ForceMode2D.Impulse);
-
-                    Debug.Log("<color=red>Boing!</color> 弾き返された！");
-
-                    // ※ここで「耐えた」アニメーション等を再生すると良い
-                    if (animator != null) animator.SetTrigger("Endure");
-                }
+                rb.AddForce(impactForce.normalized * flinchForce, ForceMode2D.Impulse);
             }
-            return; // ここで終了（倒れない）
+
+            // 引数のinstigatorを使ってカウンター
+            if (instigator != null && instigator.TryGetComponent<Rigidbody2D>(out var targetRb))
+            {
+                // 相手を来た方向へ弾き返す
+                Vector2 counterDir = (instigator.transform.position - transform.position).normalized;
+                targetRb.AddForce(counterDir * impactMagnitude * bounceBackMultiplier, ForceMode2D.Impulse);
+            }
+
+            if (animator != null) animator.SetTrigger(AnimHashEndure);
+
+            // 処理終了（基底クラスの吹き飛び処理を行わない）
+            return;
         }
 
-        // 閾値を超えていれば、通常の吹っ飛び処理へ
-        base.TakeImpact(playerVelocity, knockbackMultiplier);
+        // --- 2. ガードブレイク (Guard Break) ---
+        // 閾値を超えたため、倍率をかけて派手に吹き飛ばす
+        Vector2 breakForce = impactForce * breakGuardMultiplier;
+
+        // 基底クラスへ委譲
+        base.TakeImpact(breakForce, instigator);
     }
 }

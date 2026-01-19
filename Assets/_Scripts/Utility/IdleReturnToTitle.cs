@@ -28,8 +28,9 @@ public class IdleReturnToTitle : MonoBehaviour
         }
         else
         {
-            // 入力がなければ時間を計測
-            currentIdleTime += Time.deltaTime;
+            // Time.timeScaleが0（ポーズ中やキャリブレーション中）でも計測できるよう
+            // unscaledDeltaTimeを使用する
+            currentIdleTime += Time.unscaledDeltaTime;
 
             if (currentIdleTime >= timeLimit)
             {
@@ -47,7 +48,7 @@ public class IdleReturnToTitle : MonoBehaviour
         // Input.anyKey はマウスボタンやキーボードのどれかが押されているとtrue
         if (Input.anyKey) return true;
 
-        // マウスが動いた場合もリセットしたいなら以下を追加
+        // マウスの移動検知
         if (Mathf.Abs(Input.GetAxis("Mouse X")) > 0.1f || Mathf.Abs(Input.GetAxis("Mouse Y")) > 0.1f) return true;
 
         // 2. Arduino入力（つり革）
@@ -71,6 +72,10 @@ public class IdleReturnToTitle : MonoBehaviour
     {
         isReturning = true;
         Debug.Log("放置タイムアウト：タイトルへ戻ります");
+
+        // タイムスケールを標準に戻してからシーン遷移を行う
+        // (キャリブレーション中などにtimeScaleが0のまま遷移するのを防ぐ)
+        Time.timeScale = 1f;
 
         // StageManagerで使っているフェード機能があればそれを使う
         if (SceneFader.instance != null)

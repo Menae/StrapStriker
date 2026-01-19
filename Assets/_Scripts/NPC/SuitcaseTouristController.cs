@@ -8,7 +8,7 @@ public class SuitcaseTouristController : NPCController
     [Tooltip("スーツケースを射出する力")]
     public float shootForce = 10f;
 
-    // プレハブでの初期位置を覚えておく変数
+    // 初期位置・回転のキャッシュ
     private Vector3 defaultSuitcasePosition;
     private Quaternion defaultSuitcaseRotation;
 
@@ -17,7 +17,6 @@ public class SuitcaseTouristController : NPCController
         base.Awake();
         npcType = NPCType.Suitcase;
 
-        // 追加: ゲーム開始時(Awake)に、あなたがプレハブで配置した位置を記憶する
         if (suitcaseObject != null)
         {
             defaultSuitcasePosition = suitcaseObject.transform.localPosition;
@@ -31,70 +30,71 @@ public class SuitcaseTouristController : NPCController
         {
             suitcaseObject.SetActive(true);
             suitcaseObject.transform.SetParent(this.transform);
-
-            // 記憶しておいた位置に戻す
             suitcaseObject.transform.localPosition = defaultSuitcasePosition;
             suitcaseObject.transform.localRotation = defaultSuitcaseRotation;
 
-            // 物理挙動をリセット（持っている間は重力で落ちないようにする）
-            Rigidbody2D sRb = suitcaseObject.GetComponent<Rigidbody2D>();
-            if (sRb != null)
+            if (suitcaseObject.TryGetComponent<Rigidbody2D>(out var sRb))
             {
-                sRb.simulated = false; // 物理演算を無効化（＝その場に留まる）
-                sRb.velocity = Vector2.zero; // 速度もゼロに
+                sRb.simulated = false;
+                sRb.velocity = Vector2.zero;
             }
         }
     }
 
-    public override void TakeImpact(Vector2 playerVelocity, float knockbackMultiplier)
+    /// <summary>
+    /// 衝撃処理のオーバーライド
+    /// スーツケースを分離し、衝撃の方向へ射出する
+    /// </summary>
+    public override void TakeImpact(Vector2 impactForce, GameObject instigator)
     {
         if (currentState == NPCState.KnockedDown) return;
 
+        // スーツケースの発射処理
         if (suitcaseObject != null && suitcaseObject.transform.parent == this.transform)
         {
-            suitcaseObject.transform.SetParent(null);
-
-            Rigidbody2D sRb = suitcaseObject.GetComponent<Rigidbody2D>();
-            Collider2D sCol = suitcaseObject.GetComponent<Collider2D>();
-
-            if (sRb == null) sRb = suitcaseObject.AddComponent<Rigidbody2D>();
-            if (sCol == null) sCol = suitcaseObject.AddComponent<BoxCollider2D>();
-
-            sRb.simulated = true;
-
-            // Y軸固定・回転固定（これはそのまま）
-            sRb.constraints = RigidbodyConstraints2D.FreezePositionY | RigidbodyConstraints2D.FreezeRotation;
-
-            // プレイヤー衝突無視（そのまま）
-            PlayerController player = FindObjectOfType<PlayerController>();
-            if (player != null)
-            {
-                Collider2D playerCol = player.GetComponent<Collider2D>();
-                if (playerCol != null && sCol != null)
-                {
-                    Physics2D.IgnoreCollision(sCol, playerCol, true);
-                }
-            }
-
-            SuitcaseProjectile projectile = suitcaseObject.GetComponent<SuitcaseProjectile>();
-            if (projectile == null) projectile = suitcaseObject.AddComponent<SuitcaseProjectile>();
-
-            // --- 速度を直接指定してLaunchする ---
-
-            // 進行方向の決定
-            float directionX = Mathf.Sign(playerVelocity.x);
-            if (Mathf.Abs(playerVelocity.x) < 0.1f)
-            {
-                directionX = Mathf.Sign(suitcaseObject.transform.position.x - player.transform.position.x);
-            }
-
-            // 「方向 × 速さ（ShootForce）」を計算して渡す
-            Vector2 launchVelocity = new Vector2(directionX * shootForce, 0f);
-
-            // 新しいLaunchメソッドを呼び出す
-            projectile.Launch(launchVelocity);
+            DetachAndLaunchSuitcase(impactForce, instigator);
         }
 
-        base.TakeImpact(playerVelocity, knockbackMultiplier);
+        // 本体の吹き飛び処理（基底クラス）
+        base.TakeImpact(impactForce, instigator);
+    }
+
+    /// <summary>
+    /// メソッド抽出による可読性向上：スーツケースの切り離しと発射
+    /// </summary>
+    private void DetachAndLaunchSuitcase(Vector2 impactForce, GameObject instigator)
+    {
+        suitcaseObject.transform.SetParent(null);
+
+        // コンポーネント取得（なければ追加）の簡略化
+        if (!suitcaseObject.TryGetComponent(out Rigidbody2D sRb)) sRb = suitcaseObject.AddComponent<Rigidbody2D>();
+        if (!suitcaseObject.TryGetComponent(out Collider2D sCol)) sCol = suitcaseObject.AddComponent<BoxCollider2D>();
+
+        sRb.simulated = true;
+        sRb.constraints = RigidbodyConstraints2D.FreezePositionY | RigidbodyConstraints2D.FreezeRotation;
+
+        // instigatorとの衝突を無視する
+        if (instigator != null && instigator.TryGetComponent<Collider2D>(out var instigatorCol))
+        {
+            Physics2D.IgnoreCollision(sCol, instigatorCol, true);
+        }
+
+        // プロジェクタイル化
+        if (!suitcaseObject.TryGetComponent(out SuitcaseProjectile projectile))
+            projectile = suitcaseObject.AddComponent<SuitcaseProjectile>();
+
+        // --- 方向計算の最適化 ---
+        // 衝撃力(impactForce)の方向を利用する。
+        // 衝撃がほぼ垂直(0に近い)場合は、加害者との位置関係から方向を算出するフォールバックを入れる
+        float directionX = Mathf.Sign(impactForce.x);
+
+        if (Mathf.Abs(impactForce.x) < 0.1f && instigator != null)
+        {
+            // 加害者が左にいたら右へ(1)、右にいたら左へ(-1)
+            directionX = Mathf.Sign(suitcaseObject.transform.position.x - instigator.transform.position.x);
+        }
+
+        Vector2 launchVelocity = new Vector2(directionX * shootForce, 0f);
+        projectile.Launch(launchVelocity);
     }
 }
