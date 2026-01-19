@@ -216,9 +216,15 @@ public class ArduinoInputManager : MonoBehaviour
 
     /// <summary>
     /// 外部ファイル 'config.txt' からポート設定を読み込む。
+    /// エディタ実行時はInspectorの設定を優先するため読み込みをスキップする。
     /// </summary>
     private void LoadConfig()
     {
+#if UNITY_EDITOR
+        // エディタ上ではConfigを無視して、Inspectorの設定値を使う
+        Debug.Log("Editor Mode: Skipping Config Load. Using Inspector settings.");
+#else
+        // ビルド済みアプリ（本番環境）でのみ実行されるコード
         string configPath = Path.Combine(Application.dataPath, "..", "config.txt");
 
         if (File.Exists(configPath))
@@ -254,6 +260,7 @@ public class ArduinoInputManager : MonoBehaviour
                 Debug.LogError($"Config Write Error: {e.Message}");
             }
         }
+#endif
     }
 
     /// <summary>
