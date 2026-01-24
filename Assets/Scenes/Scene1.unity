@@ -343,8 +343,8 @@ MonoBehaviour:
   playerController: {fileID: 1082202011}
   stageManager: {fileID: 1142329253}
   measureDuration: 2
-  waitOnThreshold: 1000
-  waitOffThreshold: 500
+  waitOnThreshold: 1500
+  waitOffThreshold: 1400
   debugVirtualValue: 3000
 --- !u!1001 &30730431
 PrefabInstance:
@@ -6883,13 +6883,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   handPoint: {fileID: 1770777878}
   feetPosition: {fileID: 219443596}
-  gripNormalizedThreshold: 0.5
+  gripNormalizedThreshold: 0.25
   gripReleaseGracePeriod: 0.1
   inputDelayAfterStart: 0.1
   accelHorizontalAxis: 0
-  accelVerticalAxis: 2
+  accelVerticalAxis: 3
   gyroRotationAxis: 4
-  swayMaxAngle: 60
+  swayMaxAngle: 720
   directControlSmoothSpeed: 5
   maxSwingStages: 5
   minStageToLaunch: 2
@@ -6923,8 +6923,8 @@ MonoBehaviour:
     m_Bits: 64
   groundCheckDistance: 0.2
   groundBrakingFactor: 0.1
-  debugMode: 1
-  useDirectControl: 0
+  debugMode: 0
+  useDirectControl: 1
   invertDirectControl: 0
 --- !u!61 &1082202013
 BoxCollider2D:
@@ -10570,7 +10570,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   timeLimit: 60
-  gripThreshold: 200
+  gripThreshold: 2000
   titleSceneName: TitleScreen
 --- !u!1001 &1597328802
 PrefabInstance:

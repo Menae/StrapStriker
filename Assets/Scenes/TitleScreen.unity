@@ -1388,7 +1388,7 @@ MonoBehaviour:
   gripThreshold: 10
   tiltThreshold: 10
   invertTilt: 0
-  stateChangeCooldown: 0.5
+  stateChangeCooldown: 1
 --- !u!114 &1092358437
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2679,7 +2679,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 6.295288, y: 21.31999}
+  m_AnchoredPosition: {x: 6.295166, y: 21.319946}
   m_SizeDelta: {x: 137.96939, y: 143.59998}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1894032383
@@ -2751,7 +2751,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackPortName: COM6
   baudRate: 115200
-  smoothingFactor: 0.2
+  smoothingFactor: 0.5
 --- !u!4 &2085190142
 Transform:
   m_ObjectHideFlags: 0
