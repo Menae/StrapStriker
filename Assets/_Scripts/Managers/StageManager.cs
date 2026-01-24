@@ -5,184 +5,174 @@ using TMPro;
 using System.Collections;
 using System.Collections.Generic;
 
-/// <summary>
-/// 効果音の設定を保持するデータクラス。
-/// AudioClipと音量を組み合わせて管理する。
-/// </summary>
 [System.Serializable]
 public class SoundEffect
 {
     [Tooltip("再生するオーディオクリップ")]
     public AudioClip clip;
-
     [Tooltip("この効果音の音量")]
     [Range(0f, 1f)]
     public float volume = 1.0f;
 }
 
-/// <summary>
-/// どの種類の敵を何体、どこに出すかの定義。
-/// </summary>
 [System.Serializable]
 public struct SpawnWave
 {
-    [Tooltip("スポーンさせる敵の種類")]
     public NPCType npcType;
-    [Tooltip("スポーン数")]
     public int count;
-    [Tooltip("ドア付近にスポーンさせるか（falseならエリア内ランダム）")]
     public bool spawnAtDoor;
 }
 
 [System.Serializable]
 public class StationEvent
 {
-    [Tooltip("この駅に到着するまでの時間(秒)")]
     public float timeToArrival;
-
-    [Tooltip("この駅で発生する敵のスポーンウェーブ")]
     public List<SpawnWave> spawnWaves;
 
-    [Tooltip("駅の名前(UI表示用)")]
-    public string stationName;
+    [Header("駅名設定")]
+    [Tooltip("日本語の駅名")]
+    public string stationNameJP;
+    [Tooltip("英語の駅名")]
+    public string stationNameEN;
 
-    [Tooltip("この駅で表示する背景のスプライト")]
     public Sprite stationBackgroundSprite;
 }
 
-/// <summary>
-/// 混雑率に応じた開始ステージボーナスの設定構造体。
-/// 指定した範囲内の混雑率であれば、指定したステージからスイングを開始する。
-/// </summary>
 [System.Serializable]
 public struct CongestionBonusSettings
 {
-    [Tooltip("この設定が適用される最小混雑率 (%)")]
     public float minRate;
-    [Tooltip("この設定が適用される最大混雑率 (%)")]
     public float maxRate;
-    [Tooltip("適用される開始ステージ")]
     public int startStage;
 }
 
-/// <summary>
-/// NPC撃破数に応じた開始ステージボーナスの設定構造体。
-/// 指定した数以上倒していれば、指定したステージからスイングを開始する。
-/// </summary>
 [System.Serializable]
 public struct DefeatedBonusSettings
 {
-    [Tooltip("この設定が適用される最低撃破数")]
     public int minDefeatedCount;
-    [Tooltip("適用される開始ステージ")]
     public int startStage;
 }
 
 /// <summary>
-/// ステージ全体の進行を管理するマネージャー。
-/// 駅イベントの制御、混雑率の計算、慣性の管理、UIの更新に加え、
-/// プレイヤーへの「勢いボーナス」の計算やオーバーロード（混雑限界）の監視を担当する。
+/// ステージ進行管理マネージャー。
+/// 混雑率の内部計算、言語別の駅名/ステータス表示、共通パネルの制御を一元管理する。
 /// </summary>
 [RequireComponent(typeof(AudioSource))]
 public class StageManager : MonoBehaviour
 {
-    /// <summary>
-    /// ゲーム全体の進行状態を表す列挙型。
-    /// </summary>
     public enum GameState { Tutorial, Playing, Paused, GameOver, StageClear }
-
     public GameState CurrentState { get; private set; }
     public static Vector2 CurrentInertia { get; private set; }
 
-    [Header("慣性設定")]
-    [Tooltip("加速/減速中に働く慣性力の強さ")]
+    [Header("■ 慣性設定")]
     public float inertiaForce = 10f;
 
-    [Header("混雑率設定")]
+    // ---------------------------------------------------------
+    // 混雑率設定 (内部計算用・表示なし)
+    // ---------------------------------------------------------
+    [Header("■ 混雑率設定 (ロジックのみ)")]
     [Tooltip("初期の混雑率")]
-    public float initialCongestionRate = 150f;
+    public float initialCongestionRate = 100f;
     [Tooltip("ゲームオーバーになる混雑率")]
     public float maxCongestionRate = 300f;
-    [Tooltip("NPCが1人減るごとに、何%混雑率が下がるか")]
+    [Tooltip("NPCが1人減るごとに減少する混雑率")]
     public float rateDecreasePerNpc = 1.5f;
 
-    [Header("▼ 勢いボーナス設定 (混雑率)")]
-    [Tooltip("混雑率に応じた開始ステージボーナスのリスト。上から順に評価されるため、範囲が被らないよう設定推奨。")]
-    public List<CongestionBonusSettings> congestionBonusList;
+    // 外部（メーターUI等）から参照するためのプロパティ
+    public float CurrentCongestionRate => currentCongestionRate;
 
-    [Header("▼ 勢いボーナス設定 (撃破数)")]
-    [Tooltip("撃破数に応じた開始ステージボーナスのリスト。条件を満たす最大の設定が適用される。")]
+    [Header("▼ オーバーロード設定")]
+    public float overloadCongestionThreshold = 250f;
+    public float overloadDurationToGameOver = 5.0f;
+
+    [Header("■ 勢いボーナス設定")]
+    public List<CongestionBonusSettings> congestionBonusList;
     public List<DefeatedBonusSettings> defeatedBonusList;
 
-    [Header("▼ オーバーロード設定 (混雑限界)")]
-    [Tooltip("この混雑率を超えると「危険状態」とみなし、タイマーを作動させる")]
-    public float overloadCongestionThreshold = 250f;
-    [Tooltip("危険状態がこの秒数続くとゲームオーバーになる")]
-    public float overloadDurationToGameOver = 5.0f;
-    [Tooltip("現在オーバーロード中かどうかを表示するテキスト (UI用)")]
-    public TextMeshProUGUI overloadWarningText;
-
-    [Header("ステージ設定")]
-    [Tooltip("このステージの駅イベントリスト。順番に設定してください。")]
+    [Header("■ ステージイベント設定")]
     public List<StationEvent> stationEvents;
 
-    [Header("UI設定 (パネル類)")]
+    // ---------------------------------------------------------
+    // UI参照：基本UIコンテナ (ここを追加・復活)
+    // ---------------------------------------------------------
+    [Header("■ UIコンテナ (言語別・常時表示要素)")]
+    [Tooltip("日本語環境で常時表示するUIの親オブジェクト（スコア盤など）")]
+    public GameObject uiContainerJP;
+    [Tooltip("英語環境で常時表示するUIの親オブジェクト")]
+    public GameObject uiContainerEN;
+
+    // ---------------------------------------------------------
+    // UI参照：パネル (共通仕様)
+    // ---------------------------------------------------------
+    [Header("■ パネル (言語共通・TMP切り替え想定)")]
     public GameObject tutorialPanel;
     public GameObject pauseMenuPanel;
     public GameObject gameOverPanel;
-    public GameObject clearPanel;
+    public GameObject clearPanel; // ResultUIがない場合の予備
 
-    [Header("UI設定 (テキスト類)")]
-    public TextMeshProUGUI stationNameText;
-    public TextMeshProUGUI congestionRateText;
+    // ---------------------------------------------------------
+    // UI参照：駅名 (言語別TMP)
+    // ---------------------------------------------------------
+    [Header("■ 駅名表示 (言語別オブジェクト)")]
+    [Tooltip("日本語表示用のTMPオブジェクト")]
+    public TextMeshProUGUI stationNameTextJP;
+    [Tooltip("英語表示用のTMPオブジェクト")]
+    public TextMeshProUGUI stationNameTextEN;
+
+    // ---------------------------------------------------------
+    // UI参照：ステータス表示 (言語別画像)
+    // ---------------------------------------------------------
+    [Header("■ ステータス表示 (日本語)")]
+    public GameObject statusJP_Decelerating; // 減速中
+    public GameObject statusJP_Stopped;      // 停車中
+    public GameObject statusJP_Accelerating; // 加速中
+
+    [Header("■ ステータス表示 (英語)")]
+    public GameObject statusEN_Decelerating; // DECELERATING
+    public GameObject statusEN_Stopped;      // STOPPED
+    public GameObject statusEN_Accelerating; // ACCELERATING
+
+    // ---------------------------------------------------------
+    // その他 共通UI・設定
+    // ---------------------------------------------------------
+    [Header("■ 共通UI")]
     public TextMeshProUGUI defeatedNpcCountText;
 
-    [Header("UI設定 (ステータス表示オブジェクト)")]
-    public GameObject statusObjDecelerating;
-    public GameObject statusObjStopped;
-    public GameObject statusObjAccelerating;
-
-    [Header("駅進捗UI設定")]
+    [Header("■ 駅進捗UI")]
     public Image yellowBall;
     public List<RectTransform> stationIconPositions;
     public float blinkInterval = 0.5f;
 
-    [Header("駅到着演出の設定")]
+    [Header("■ 演出・効果音設定")]
     public SoundEffect arrivalSound;
     public float delayBeforeSpawn = 2.0f;
     public float stationStopTime = 5.0f;
     public float accelerationTime = 3.0f;
-
-    [Header("リザルト・評価設定")]
-    [Tooltip("リザルト演出を管理するスクリプト")]
-    public ResultUIController resultUI;
-
-    [Tooltip("星2を獲得するために必要な撃破数")]
-    public int rankThreshold2Stars = 10;
-    [Tooltip("星3を獲得するために必要な撃破数")]
-    public int rankThreshold3Stars = 20;
-
-    [Header("最終走行(クリア)の設定")]
     public float finalRunDuration = 20f;
     public SoundEffect finalArrivalSound;
-
-    [Header("効果音設定")]
     public SoundEffect npcDefeatSound;
 
-    [Header("背景")]
+    [Header("■ 外部参照")]
+    public ResultUIController resultUI;
     public ParallaxController parallaxController;
-
-    [Header("ドア")]
     public DoorManager doorController;
 
+    [Header("■ 評価基準")]
+    public int rankThreshold2Stars = 10;
+    public int rankThreshold3Stars = 20;
+
+    [Header("■ デバッグ設定")]
+    [Tooltip("【開発用】タイトルを経由せず起動した時、英語モードとして扱うか")]
+    [SerializeField] private bool debugForceEnglish = false;
+
+    // 内部変数
     private AudioSource audioSource;
     private float currentCongestionRate;
+    private float currentOverloadTimer = 0f;
     private int defeatedNpcCount;
     private int currentStationIndex;
     private Coroutine blinkingEffectCoroutine;
-
-    // オーバーロード監視用タイマー
-    private float currentOverloadTimer = 0f;
+    private bool isEnglishMode = false;
 
     private enum StatusDisplayType { None, Decelerating, Stopped, Accelerating }
 
@@ -193,23 +183,66 @@ public class StageManager : MonoBehaviour
 
     void Start()
     {
+        // 言語設定の取得と適用
+        ApplyLanguageSettings();
+
+        // パネル初期化
+        HideAllPanels();
+
+        // ステータス表示初期化
+        SetStatusDisplay(StatusDisplayType.Stopped);
+
+        // 駅名初期化
+        UpdateStationNameUI("");
+
+        CurrentInertia = Vector2.zero;
+        Time.timeScale = 1f;
+
+        defeatedNpcCount = 0;
+        UpdateDefeatedNpcCountUI();
+    }
+
+    /// <summary>
+    /// LocalizationManagerの設定に基づき、言語フラグを設定。
+    /// 基本UIコンテナと駅名TMPのActive切り替えを行う。
+    /// </summary>
+    private void ApplyLanguageSettings()
+    {
+        // 1. まずは正規の手順で言語状態を取得
+        isEnglishMode = false;
+
+        if (LocalizationManager.Instance != null)
+        {
+            isEnglishMode = (LocalizationManager.Instance.CurrentLanguage == Language.English);
+        }
+
+        // 2. エディタ実行時かつデバッグフラグがONなら、問答無用で上書きする
+#if UNITY_EDITOR
+        if (debugForceEnglish)
+        {
+            isEnglishMode = true;
+            // 混乱を防ぐため、強制上書きしたことをログに出す
+            Debug.Log("<color=yellow>Debug:</color> Inspector設定により英語モードを強制適用しました");
+        }
+#endif
+
+        // 3. 決定した言語モードに基づいて表示を切り替え
+
+        // 常時表示UI（コンテナ）の切り替え
+        if (uiContainerJP != null) uiContainerJP.SetActive(!isEnglishMode);
+        if (uiContainerEN != null) uiContainerEN.SetActive(isEnglishMode);
+
+        // 駅名TMPの表示切り替え
+        if (stationNameTextJP != null) stationNameTextJP.gameObject.SetActive(!isEnglishMode);
+        if (stationNameTextEN != null) stationNameTextEN.gameObject.SetActive(isEnglishMode);
+    }
+
+    private void HideAllPanels()
+    {
         if (tutorialPanel != null) tutorialPanel.SetActive(false);
         if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
         if (clearPanel != null) clearPanel.SetActive(false);
-        if (overloadWarningText != null) overloadWarningText.text = "";
-
-        SetStatusDisplay(StatusDisplayType.Stopped);
-
-        if (stationNameText != null) stationNameText.text = "";
-        CurrentInertia = Vector2.zero;
-
-        Time.timeScale = 1f;
-
-        UpdateCongestionUI();
-
-        defeatedNpcCount = 0;
-        UpdateDefeatedNpcCountUI();
     }
 
     public void ShowTutorial()
@@ -223,114 +256,116 @@ public class StageManager : MonoBehaviour
     {
         if (CurrentState == GameState.Playing)
         {
-            // オーバーロード（混雑しすぎ）チェック
             CheckOverloadStatus();
         }
 
         if (CurrentState == GameState.Playing || CurrentState == GameState.Paused)
         {
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                TogglePause();
-            }
+            if (Input.GetKeyDown(KeyCode.Escape)) TogglePause();
         }
     }
 
     /// <summary>
-    /// 現在の混雑率と撃破数に基づいて、プレイヤーに付与する開始ステージを計算する。
-    /// 混雑ボーナスと撃破ボーナスのうち、高い方の値を採用する。
-    /// PlayerControllerからつり革を掴んだ瞬間に呼び出される想定。
+    /// 混雑率と撃破数に基づいて開始ステージボーナスを計算する。
     /// </summary>
-    /// <returns>適用すべき開始ステージ (0以上の整数)</returns>
     public int GetCalculatedStartStage()
     {
         int congestionBonus = 0;
         int defeatedBonus = 0;
 
-        // 1. 混雑率によるボーナス計算
+        // 1. 混雑率ボーナス
         foreach (var setting in congestionBonusList)
         {
             if (currentCongestionRate >= setting.minRate && currentCongestionRate < setting.maxRate)
             {
-                // 条件に合致する設定が見つかったら適用（上書き）
                 congestionBonus = setting.startStage;
-                // リストの下にある設定ほど優先度が高い設計にするなら break しないが、
-                // 基本的には範囲指定なので最初に見つかったものを採用して break
                 break;
             }
         }
 
-        // 2. 撃破数によるボーナス計算
-        // 撃破数が多いほど有利になるよう、条件を満たす最大値を探索
+        // 2. 撃破数ボーナス
         foreach (var setting in defeatedBonusList)
         {
             if (defeatedNpcCount >= setting.minDefeatedCount)
             {
-                // より高いボーナスがあれば更新（リストが昇順でなくても最大を取れるようにMathf.Max）
                 defeatedBonus = Mathf.Max(defeatedBonus, setting.startStage);
             }
         }
 
-        // 両方のボーナスのうち、高い方を採用して返す
         return Mathf.Max(congestionBonus, defeatedBonus);
     }
 
     /// <summary>
-    /// 混雑率が危険域を超えているかを監視し、継続している場合はゲームオーバーにする。
-    /// 警告UIの更新も行う。
+    /// 混雑率オーバーロード監視ロジック。
     /// </summary>
     private void CheckOverloadStatus()
     {
         if (currentCongestionRate >= overloadCongestionThreshold)
         {
             currentOverloadTimer += Time.deltaTime;
-
-            float remainingTime = Mathf.Max(0, overloadDurationToGameOver - currentOverloadTimer);
-
-            if (overloadWarningText != null)
-            {
-                overloadWarningText.text = $"<color=red>DANGER! {remainingTime:F1}</color>";
-                overloadWarningText.gameObject.SetActive(true);
-            }
-
             if (currentOverloadTimer >= overloadDurationToGameOver)
             {
-                Debug.Log("Overload Game Over Triggered.");
                 TriggerGameOver();
             }
         }
         else
         {
-            // 閾値を下回ったらタイマーリセット
             if (currentOverloadTimer > 0f)
             {
                 currentOverloadTimer = 0f;
-                if (overloadWarningText != null)
-                {
-                    overloadWarningText.gameObject.SetActive(false);
-                }
             }
         }
     }
 
+    /// <summary>
+    /// 運行ステータス表示の更新。
+    /// 現在の言語モードに応じて、日本語版または英語版の画像を表示する。
+    /// </summary>
     private void SetStatusDisplay(StatusDisplayType type)
     {
-        if (statusObjDecelerating != null) statusObjDecelerating.SetActive(false);
-        if (statusObjStopped != null) statusObjStopped.SetActive(false);
-        if (statusObjAccelerating != null) statusObjAccelerating.SetActive(false);
+        // 全て一旦非表示
+        if (statusJP_Decelerating != null) statusJP_Decelerating.SetActive(false);
+        if (statusJP_Stopped != null) statusJP_Stopped.SetActive(false);
+        if (statusJP_Accelerating != null) statusJP_Accelerating.SetActive(false);
 
+        if (statusEN_Decelerating != null) statusEN_Decelerating.SetActive(false);
+        if (statusEN_Stopped != null) statusEN_Stopped.SetActive(false);
+        if (statusEN_Accelerating != null) statusEN_Accelerating.SetActive(false);
+
+        // 現在の言語に合わせて適切なオブジェクトを表示
         switch (type)
         {
             case StatusDisplayType.Decelerating:
-                if (statusObjDecelerating != null) statusObjDecelerating.SetActive(true);
+                if (isEnglishMode)
+                {
+                    if (statusEN_Decelerating != null) statusEN_Decelerating.SetActive(true);
+                }
+                else
+                {
+                    if (statusJP_Decelerating != null) statusJP_Decelerating.SetActive(true);
+                }
                 break;
+
             case StatusDisplayType.Stopped:
-                if (statusObjStopped != null) statusObjStopped.SetActive(true);
+                if (isEnglishMode)
+                {
+                    if (statusEN_Stopped != null) statusEN_Stopped.SetActive(true);
+                }
+                else
+                {
+                    if (statusJP_Stopped != null) statusJP_Stopped.SetActive(true);
+                }
                 break;
+
             case StatusDisplayType.Accelerating:
-                if (statusObjAccelerating != null) statusObjAccelerating.SetActive(true);
-                break;
-            case StatusDisplayType.None:
+                if (isEnglishMode)
+                {
+                    if (statusEN_Accelerating != null) statusEN_Accelerating.SetActive(true);
+                }
+                else
+                {
+                    if (statusJP_Accelerating != null) statusJP_Accelerating.SetActive(true);
+                }
                 break;
         }
     }
@@ -338,11 +373,11 @@ public class StageManager : MonoBehaviour
     public void StartGame()
     {
         CurrentState = GameState.Playing;
-        if (tutorialPanel != null) tutorialPanel.SetActive(false);
+        HideAllPanels();
         Time.timeScale = 1f;
 
         currentCongestionRate = initialCongestionRate;
-        UpdateCongestionUI();
+        // 初期スポーン（混雑率に基づく）
         NPCManager.instance.SpawnNPCsForCongestion(this, currentCongestionRate);
 
         currentStationIndex = 0;
@@ -357,8 +392,8 @@ public class StageManager : MonoBehaviour
 
     public void OnNpcDefeated()
     {
-        currentCongestionRate -= rateDecreasePerNpc;
-        UpdateCongestionUI();
+        // 撃破時は混雑率を下げる
+        currentCongestionRate = Mathf.Max(0, currentCongestionRate - rateDecreasePerNpc);
 
         defeatedNpcCount++;
         UpdateDefeatedNpcCountUI();
@@ -367,16 +402,22 @@ public class StageManager : MonoBehaviour
     private void UpdateDefeatedNpcCountUI()
     {
         if (defeatedNpcCountText != null)
-        {
             defeatedNpcCountText.text = defeatedNpcCount.ToString();
-        }
     }
 
-    private void UpdateCongestionUI()
+    /// <summary>
+    /// 駅名表示を更新する。
+    /// 現在の言語設定に関わらず両方のTMPにテキストを流し込む（Active状態で表示制御）。
+    /// </summary>
+    private void UpdateStationNameUI(string jpName, string enName = "")
     {
-        if (congestionRateText != null)
+        // 日本語TMPへの反映
+        if (stationNameTextJP != null) stationNameTextJP.text = jpName;
+
+        // 英語TMPへの反映（英語名が指定なければ日本語名を入れる）
+        if (stationNameTextEN != null)
         {
-            congestionRateText.text = $"{Mathf.CeilToInt(currentCongestionRate)}";
+            stationNameTextEN.text = string.IsNullOrEmpty(enName) ? jpName : enName;
         }
     }
 
@@ -385,8 +426,6 @@ public class StageManager : MonoBehaviour
         CurrentState = GameState.GameOver;
         Time.timeScale = 0f;
         if (gameOverPanel != null) gameOverPanel.SetActive(true);
-        if (overloadWarningText != null) overloadWarningText.gameObject.SetActive(false);
-        Debug.Log("ゲームオーバー！");
     }
 
     public void RetryStage()
@@ -401,24 +440,26 @@ public class StageManager : MonoBehaviour
         SceneFader.instance.LoadSceneWithFade("TitleScreen");
     }
 
+    // --- メイン進行ループ ---
+
     private IEnumerator StageProgressionCoroutine()
     {
         SetStatusDisplay(StatusDisplayType.None);
 
-        if (stationNameText != null)
+        // 最初の駅名表示
+        if (stationEvents.Count > 0)
         {
-            if (stationEvents.Count > 0)
-            {
-                stationNameText.text = $"次は {stationEvents[0].stationName}";
-            }
-            else
-            {
-                stationNameText.text = "";
-            }
+            var first = stationEvents[0];
+            UpdateStationNameUI($"次は {first.stationNameJP}", $"NEXT: {first.stationNameEN}");
+        }
+        else
+        {
+            UpdateStationNameUI("");
         }
 
         CurrentInertia = Vector2.zero;
 
+        // 各駅への進行処理
         foreach (var station in stationEvents)
         {
             yield return new WaitForSeconds(station.timeToArrival);
@@ -428,28 +469,27 @@ public class StageManager : MonoBehaviour
             if (currentStationIndex < stationIconPositions.Count)
             {
                 if (yellowBall != null)
-                {
                     yellowBall.rectTransform.position = stationIconPositions[currentStationIndex].position;
-                }
                 StartBlinking();
             }
 
-            if (stationNameText != null && currentStationIndex < stationEvents.Count)
+            // 次の駅名更新
+            if (currentStationIndex < stationEvents.Count)
             {
-                stationNameText.text = $"次は {stationEvents[currentStationIndex].stationName}";
+                var next = stationEvents[currentStationIndex];
+                UpdateStationNameUI($"次は {next.stationNameJP}", $"NEXT: {next.stationNameEN}");
             }
         }
 
+        // 終点へのアプローチ
         SetStatusDisplay(StatusDisplayType.None);
-
-        if (stationNameText != null) stationNameText.text = "次は 終点";
+        UpdateStationNameUI("次は 終点", "NEXT: TERMINAL");
         CurrentInertia = Vector2.zero;
 
         yield return new WaitForSeconds(finalRunDuration);
 
-        if (stationNameText != null) stationNameText.text = "終点 まもなく到着";
+        UpdateStationNameUI("終点 まもなく到着", "ARRIVING AT TERMINAL");
         SetStatusDisplay(StatusDisplayType.Decelerating);
-
         CurrentInertia = new Vector2(inertiaForce, 0);
 
         yield return new WaitForSeconds(delayBeforeSpawn);
@@ -463,56 +503,39 @@ public class StageManager : MonoBehaviour
         TriggerStageClear();
     }
 
-    /// <summary>
-    /// 駅への到着から出発までの一連のシーケンスを処理するコルーチン。
-    /// 減速、停車、NPCスポーン（Wave対応版）、加速の各フェーズを順番に実行する。
-    /// 混雑率が最大値を超えた場合はゲームオーバーにする。
-    /// </summary>
-    /// <param name="station">到着する駅のイベントデータ</param>
     private IEnumerator ArrivalSequenceCoroutine(StationEvent station)
     {
         if (parallaxController != null)
-        {
             parallaxController.StartApproachingStation(station.stationBackgroundSprite);
-        }
 
-        if (stationNameText != null) stationNameText.text = $"まもなく {station.stationName}";
+        UpdateStationNameUI($"まもなく {station.stationNameJP}", $"ARRIVING AT {station.stationNameEN}");
         SetStatusDisplay(StatusDisplayType.Decelerating);
-
         CurrentInertia = new Vector2(inertiaForce, 0);
 
         yield return new WaitForSeconds(delayBeforeSpawn);
 
         StopBlinking();
-
         if (finalArrivalSound != null && finalArrivalSound.clip != null)
         {
             audioSource.PlayOneShot(finalArrivalSound.clip, finalArrivalSound.volume);
         }
 
-        if (doorController != null)
-        {
-            DoorManager.OpenAllDoors();
-        }
+        if (doorController != null) DoorManager.OpenAllDoors();
 
-        // --- spawnWavesリストに基づいてループ処理 ---
-        // 各Waveの設定に従って、指定された種類・数のNPCをスポーンさせる
-        int totalSpawnedCount = 0;
-
+        // スポーン処理 & 混雑率加算
+        int totalSpawned = 0;
         if (station.spawnWaves != null)
         {
             foreach (var wave in station.spawnWaves)
             {
-                // NPCManagerに追加した SpawnSpecificNPCs メソッドを使用
                 int c = NPCManager.instance.SpawnSpecificNPCs(this, wave.npcType, wave.count, wave.spawnAtDoor);
-                totalSpawnedCount += c;
+                totalSpawned += c;
             }
         }
 
-        // 混雑率の更新（スポーンした総数を使用）
-        currentCongestionRate += totalSpawnedCount * rateDecreasePerNpc;
-        UpdateCongestionUI();
+        currentCongestionRate += totalSpawned * rateDecreasePerNpc; // レート換算で増加させる
 
+        // ゲームオーバー判定
         if (currentCongestionRate >= maxCongestionRate)
         {
             TriggerGameOver();
@@ -524,13 +547,9 @@ public class StageManager : MonoBehaviour
 
         yield return new WaitForSeconds(stationStopTime);
 
-        if (parallaxController != null)
-        {
-            parallaxController.DepartFromStation();
-        }
+        if (parallaxController != null) parallaxController.DepartFromStation();
 
         SetStatusDisplay(StatusDisplayType.Accelerating);
-
         CurrentInertia = new Vector2(-inertiaForce, 0);
 
         yield return new WaitForSeconds(accelerationTime);
@@ -539,42 +558,24 @@ public class StageManager : MonoBehaviour
         CurrentInertia = Vector2.zero;
     }
 
-    /// <summary>
-    /// ステージクリア処理。
-    /// 撃破数に基づいて評価を計算し、リザルト画面を表示する。
-    /// </summary>
     private void TriggerStageClear()
     {
         CurrentState = GameState.StageClear;
-
         SetStatusDisplay(StatusDisplayType.Stopped);
-
-        if (stationNameText != null) stationNameText.text = "";
-
-        // --- 変更: 旧パネル表示を廃止し、新しいリザルト処理へ ---
-        // if (clearPanel != null) clearPanel.SetActive(true); 
+        UpdateStationNameUI("");
 
         Debug.Log("ステージクリア！");
 
-        // 星の数を計算
-        int starCount = 1; // クリアすれば最低星1
-        if (defeatedNpcCount >= rankThreshold3Stars)
-        {
-            starCount = 3;
-        }
-        else if (defeatedNpcCount >= rankThreshold2Stars)
-        {
-            starCount = 2;
-        }
+        int starCount = 1;
+        if (defeatedNpcCount >= rankThreshold3Stars) starCount = 3;
+        else if (defeatedNpcCount >= rankThreshold2Stars) starCount = 2;
 
-        // リザルトUIに表示依頼
         if (resultUI != null)
         {
             resultUI.ShowResult(defeatedNpcCount, starCount);
         }
         else
         {
-            // ResultUIが設定されていない場合のフォールバック（旧パネルがあれば出す）
             if (clearPanel != null) clearPanel.SetActive(true);
         }
     }
@@ -584,7 +585,7 @@ public class StageManager : MonoBehaviour
         if (CurrentState == GameState.Paused)
         {
             CurrentState = GameState.Playing;
-            if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
+            HideAllPanels();
             Time.timeScale = 1f;
         }
         else
@@ -597,10 +598,7 @@ public class StageManager : MonoBehaviour
 
     private void StartBlinking()
     {
-        if (blinkingEffectCoroutine != null)
-        {
-            StopCoroutine(blinkingEffectCoroutine);
-        }
+        if (blinkingEffectCoroutine != null) StopCoroutine(blinkingEffectCoroutine);
         blinkingEffectCoroutine = StartCoroutine(BlinkingCoroutine());
     }
 
@@ -611,10 +609,7 @@ public class StageManager : MonoBehaviour
             StopCoroutine(blinkingEffectCoroutine);
             blinkingEffectCoroutine = null;
         }
-        if (yellowBall != null)
-        {
-            yellowBall.enabled = true;
-        }
+        if (yellowBall != null) yellowBall.enabled = true;
     }
 
     public void PlayNpcDefeatSound()
@@ -629,15 +624,9 @@ public class StageManager : MonoBehaviour
     {
         while (true)
         {
-            if (yellowBall != null)
-            {
-                yellowBall.enabled = false;
-            }
+            if (yellowBall != null) yellowBall.enabled = false;
             yield return new WaitForSeconds(blinkInterval);
-            if (yellowBall != null)
-            {
-                yellowBall.enabled = true;
-            }
+            if (yellowBall != null) yellowBall.enabled = true;
             yield return new WaitForSeconds(blinkInterval);
         }
     }

@@ -1,85 +1,146 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// ターゲット（プレイヤー）をスムーズに追従し、ステージ境界内でカメラ位置を制限するコントローラー
+/// ターゲット（プレイヤー）のX軸（水平方向）のみを追従し、Y軸（高さ）を固定するカメラコントローラー。
+/// 横スクロールアクションゲームにおける一般的なカメラ挙動を実現する。
+/// ステージの左右端への移動制限機能、およびSceneビューでの配置を維持するオフセット機能を備える。
 /// </summary>
 public class CameraController : MonoBehaviour
 {
+    // ====================================================================
+    // 設定項目 (Inspector)
+    // ====================================================================
+
     [Header("追従対象")]
-    [Tooltip("カメラが追従するターゲット（通常はプレイヤー）")]
-    public Transform target;
+    [Tooltip("カメラが追従するターゲット（プレイヤー）。")]
+    [SerializeField] private Transform target;
 
-    [Header("カメラ設定")]
-    [Tooltip("カメラがターゲットに追従する際の滑らかさ。値が小さいほど速く追従します。")]
+    [Header("オフセット設定")]
+    [Tooltip("有効の場合、ゲーム開始時の「カメラとターゲットの位置関係」を維持して追従を開始する。\n無効の場合、ターゲットのX座標に完全に重なるように補正される。")]
+    [SerializeField] private bool useSceneViewOffset = true;
+
+    [Header("カメラ挙動")]
+    [Tooltip("ターゲットの動きに対してカメラが追いつくまでの遅延時間（秒）。\n値が小さいほど機敏に、大きいほど滑らかに追従する。")]
     [Range(0.01f, 1.0f)]
-    public float smoothTime = 0.3f;
+    [SerializeField] private float smoothTime = 0.3f;
 
-    [Tooltip("カメラの初期Y座標オフセット")]
-    public float yOffset = 2.0f;
+    [Header("ステージ境界設定 (X軸)")]
+    [Tooltip("カメラ移動の左端限界座標。これより左にはスクロールしない。")]
+    [SerializeField] private float minXLimit = -10.0f;
 
-    [Tooltip("カメラの初期Z座標オフセット (2Dゲームでは通常-10など)")]
-    public float zOffset = -10.0f;
+    [Tooltip("カメラ移動の右端限界座標。これより右にはスクロールしない。")]
+    [SerializeField] private float maxXLimit = 10.0f;
 
-    [Header("ステージ境界設定")]
-    [Tooltip("カメラがこれ以上左に移動しないX座標")]
-    public float minXLimit = -10.0f;
-
-    [Tooltip("カメラがこれ以上右に移動しないX座標")]
-    public float maxXLimit = 10.0f;
-
-    [Tooltip("カメラがこれ以上下に移動しないY座標")]
-    public float minYLimit = 0.0f;
-
-    [Tooltip("カメラがこれ以上上に移動しないY座標")]
-    public float maxYLimit = 15.0f;
+    // ====================================================================
+    // 内部変数
+    // ====================================================================
 
     /// <summary>
-    /// SmoothDamp内部で使用する速度ベクトル。自動的に更新される。
+    /// ターゲットとのX軸方向の距離（オフセット）。
     /// </summary>
-    private Vector3 velocity = Vector3.zero;
+    private float xOffset = 0.0f;
 
     /// <summary>
-    /// 全てのUpdate処理が終わった後に実行され、カメラ位置を更新する。
-    /// ターゲットの最終位置に基づいて追従するため、LateUpdateで処理する。
+    /// ゲーム開始時に決定される、カメラの固定Y座標。
+    /// プレイヤーがジャンプしてもこの高さは維持される。
     /// </summary>
-    void LateUpdate()
+    private float fixedYPosition;
+
+    /// <summary>
+    /// ゲーム開始時に決定される、カメラの固定Z座標。
+    /// </summary>
+    private float fixedZPosition;
+
+    /// <summary>
+    /// Vector3.SmoothDampで使用する現在の速度参照変数は。
+    /// </summary>
+    private Vector3 currentVelocity = Vector3.zero;
+
+    // ====================================================================
+    // 実行処理
+    // ====================================================================
+
+    /// <summary>
+    /// 初期化処理。
+    /// Sceneビュー上で配置されたカメラの座標を元に、追従の基準となるオフセットと固定軸を決定する。
+    /// </summary>
+    private void Start()
     {
-        // ターゲット未設定時は警告を出して処理をスキップ
         if (target == null)
         {
             Debug.LogWarning("CameraController: ターゲットが設定されていません。");
             return;
         }
 
-        // ターゲット位置にオフセットを加えた目標位置を算出
-        Vector3 targetPosition = new Vector3(target.position.x, target.position.y + yOffset, zOffset);
+        // 高さ(Y)と奥行き(Z)は、配置された位置で固定する
+        fixedYPosition = transform.position.y;
+        fixedZPosition = transform.position.z;
 
-        // SmoothDampで現在位置から目標位置へ滑らかに補間
-        Vector3 smoothedPosition = Vector3.SmoothDamp(transform.position, targetPosition, ref velocity, smoothTime);
+        // 水平方向(X)のオフセット計算
+        if (useSceneViewOffset)
+        {
+            // 配置された「ズレ」を維持する
+            xOffset = transform.position.x - target.position.x;
+        }
+        else
+        {
+            // ターゲットの中心を捉える
+            xOffset = 0f;
+        }
+    }
 
-        // ステージ境界を超えないようにX/Y座標を制限
+    /// <summary>
+    /// カメラ位置の更新処理。
+    /// ターゲットの移動完了後（LateUpdate）に実行することで、ジッター（微細な震え）を防止する。
+    /// </summary>
+    private void LateUpdate()
+    {
+        if (target == null) return;
+
+        // 目標座標の算出
+        // X軸: ターゲットの現在位置 + 初期オフセット
+        // Y軸: 固定値
+        // Z軸: 固定値
+        Vector3 targetPosition = new Vector3(
+            target.position.x + xOffset,
+            fixedYPosition,
+            fixedZPosition
+        );
+
+        // 現在位置から目標位置へ滑らかに移動させる（減衰振動）
+        Vector3 smoothedPosition = Vector3.SmoothDamp(
+            transform.position,
+            targetPosition,
+            ref currentVelocity,
+            smoothTime
+        );
+
+        // ステージの左右境界を超えないようにX座標を制限（クランプ）する
         smoothedPosition.x = Mathf.Clamp(smoothedPosition.x, minXLimit, maxXLimit);
-        smoothedPosition.y = Mathf.Clamp(smoothedPosition.y, minYLimit, maxYLimit);
 
-        // カメラ位置を確定
+        // 最終的な座標を適用
         transform.position = smoothedPosition;
     }
 
     /// <summary>
-    /// Unityエディタのシーンビューにステージ境界を黄色の線で描画する。
-    /// ゲームビルドには影響しない。
+    /// エディタのSceneビューに移動制限範囲（境界線）を可視化するデバッグ描画。
     /// </summary>
-    void OnDrawGizmos()
+    private void OnDrawGizmos()
     {
         Gizmos.color = Color.yellow;
-        Vector3 cameraPos = transform.position;
+        float currentZ = transform.position.z;
+        float infiniteY = 1000f; // 垂直方向の境界線を視覚的に表現するための仮の高さ
 
-        // 左右の境界線
-        Gizmos.DrawLine(new Vector3(minXLimit, minYLimit, cameraPos.z), new Vector3(minXLimit, maxYLimit, cameraPos.z));
-        Gizmos.DrawLine(new Vector3(maxXLimit, minYLimit, cameraPos.z), new Vector3(maxXLimit, maxYLimit, cameraPos.z));
+        // 左端の境界線を描画
+        Gizmos.DrawLine(
+            new Vector3(minXLimit, -infiniteY, currentZ),
+            new Vector3(minXLimit, infiniteY, currentZ)
+        );
 
-        // 上下の境界線
-        Gizmos.DrawLine(new Vector3(minXLimit, minYLimit, cameraPos.z), new Vector3(maxXLimit, minYLimit, cameraPos.z));
-        Gizmos.DrawLine(new Vector3(minXLimit, maxYLimit, cameraPos.z), new Vector3(maxXLimit, maxYLimit, cameraPos.z));
+        // 右端の境界線を描画
+        Gizmos.DrawLine(
+            new Vector3(maxXLimit, -infiniteY, currentZ),
+            new Vector3(maxXLimit, infiniteY, currentZ)
+        );
     }
 }
