@@ -144,6 +144,7 @@ public class ArduinoInputManager : MonoBehaviour
             serialPort.DtrEnable = true; // M5StickC/ESP32系で再起動を防ぐために必要な場合がある
             serialPort.RtsEnable = true;
             serialPort.Open();
+            Debug.Log($"ポート {serialPort.PortName} を開きました。");
 
             isThreadRunning = true;
             readThread = new Thread(ReadSerialData);
@@ -166,53 +167,82 @@ public class ArduinoInputManager : MonoBehaviour
     /// </summary>
     private void ReadSerialData()
     {
+        string buffer = ""; // 届いた文字を貯める箱
+
         while (isThreadRunning && serialPort != null && serialPort.IsOpen)
         {
             try
             {
-                string line = serialPort.ReadLine();
-                if (string.IsNullOrEmpty(line)) continue;
-
-                string[] parts = line.Split(',');
-
-                // データ長が仕様(9個)と一致するか確認
-                if (parts.Length == 9)
+                // データが届いているか確認
+                if (serialPort.BytesToRead > 0)
                 {
-                    // パース処理。失敗時はスキップして安全性を確保
-                    if (float.TryParse(parts[0], out float gx) &&
-                        float.TryParse(parts[1], out float gy) &&
-                        float.TryParse(parts[2], out float gz) &&
-                        float.TryParse(parts[3], out float ax) &&
-                        float.TryParse(parts[4], out float ay) &&
-                        float.TryParse(parts[5], out float az) &&
-                        int.TryParse(parts[6], out int btnVal) &&
-                        int.TryParse(parts[7], out int t1) &&
-                        int.TryParse(parts[8], out int t2))
+                    // 1文字ずつ読み込む
+                    char c = (char)serialPort.ReadChar();
+
+                    // もし改行（\n か \r）が届いたら、1行完成とみなす
+                    if (c == '\n' || c == '\r')
                     {
-                        // データの更新
-                        // Vector3はアトミックではないが、読み出し頻度に対し更新頻度が高いため
-                        // lockなしで直接代入し、最新性を優先する設計とする
-                        RawGyro = new Vector3(gx, gy, gz);
-                        RawAccel = new Vector3(ax, ay, az);
-                        IsM5BtnPressed = (btnVal == 1);
-                        GripValue1 = t1;
-                        GripValue2 = t2;
+                        if (!string.IsNullOrEmpty(buffer))
+                        {
+                            // 完成した1行をデバッグ表示
+                            Debug.Log("受信完了: " + buffer);
+
+                            // データを分解して反映する処理を呼び出す
+                            ProcessLine(buffer);
+                            buffer = ""; // 箱を空にする
+                        }
+                    }
+                    else
+                    {
+                        buffer += c; // 改行以外なら箱に貯める
                     }
                 }
             }
-            catch (TimeoutException)
-            {
-                // データ待機中のタイムアウトは正常動作
-            }
             catch (Exception e)
             {
-                if (isThreadRunning)
-                {
-                    Debug.LogWarning($"Serial Read Error: {e.Message}");
-                }
+                if (isThreadRunning) Debug.LogWarning($"Serial Read Error: {e.Message}");
             }
         }
     }
+
+    // 分解処理を別出しにすると分かりやすくなります
+    private void ProcessLine(string line)
+{
+    // カンマで分割
+    string[] parts = line.Split(',');
+
+    // 9個以上のデータがあることを確認
+    if (parts.Length >= 9)
+    {
+        try {
+            // すべてを一旦 float.TryParse + Trim() で読み込む（これが一番確実です）
+            // float.TryParseは、前後の空白を無視し、整数も小数も読み込めます
+            float.TryParse(parts[0].Trim(), out float gx);
+            float.TryParse(parts[1].Trim(), out float gy);
+            float.TryParse(parts[2].Trim(), out float gz);
+            float.TryParse(parts[3].Trim(), out float ax);
+            float.TryParse(parts[4].Trim(), out float ay);
+            float.TryParse(parts[5].Trim(), out float az);
+            float.TryParse(parts[6].Trim(), out float btn);
+            float.TryParse(parts[7].Trim(), out float t1);
+            float.TryParse(parts[8].Trim(), out float t2);
+
+            // 値を反映（static変数に代入）
+            RawGyro = new Vector3(gx, gy, gz);
+            RawAccel = new Vector3(ax, ay, az);
+            IsM5BtnPressed = (btn >= 1.0f);
+            
+            // ★ ここでログを出して、解析後の数字を確認！
+            Debug.Log($"解析成功: センサー1={t1}, センサー2={t2}");
+
+            GripValue1 = (int)t1;
+            GripValue2 = (int)t2;
+        }
+        catch (System.Exception e) {
+            Debug.LogWarning("解析中にエラーが発生しました: " + e.Message);
+        }
+    }
+}
 
     /// <summary>
     /// 外部ファイル 'config.txt' からポート設定を読み込む。

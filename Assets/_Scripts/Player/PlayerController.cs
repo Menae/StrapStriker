@@ -485,7 +485,9 @@ public class PlayerController : MonoBehaviour
         // 2. 基準角度（270度）からの変位量を計算
         // =================================================================
 
-        float angleDifference = Mathf.DeltaAngle(270f, inputAngle);
+        float angleDifference = Mathf.DeltaAngle(0f, inputAngle);
+
+        Debug.Log($"現在の生角度: {inputAngle:F1} | 左右のズレ: {angleDifference:F1}");
 
         if (invertDirectControl)
         {
