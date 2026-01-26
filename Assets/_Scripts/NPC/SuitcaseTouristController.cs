@@ -1,100 +1,103 @@
 ﻿using UnityEngine;
 
+/// <summary>
+/// 衝撃を受けた際にスーツケースを切り離し、地面を滑らせるコントローラー。
+/// </summary>
 public class SuitcaseTouristController : NPCController
 {
-    [Header("スーツケース設定")]
-    [Tooltip("発射するスーツケースのオブジェクト")]
-    public GameObject suitcaseObject;
-    [Tooltip("スーツケースを射出する力")]
-    public float shootForce = 10f;
+    [Header("Visuals")]
+    [SerializeField] private GameObject suitcaseVisual;
 
-    // 初期位置・回転のキャッシュ
-    private Vector3 defaultSuitcasePosition;
-    private Quaternion defaultSuitcaseRotation;
+    [Header("Physics Settings")]
+    [Tooltip("切り離し時の初速")]
+    [SerializeField] private float slideSpeed = 15f;
+
+    [Tooltip("滑走時の減速率 (空気抵抗)")]
+    [SerializeField] private float groundFriction = 2.0f;
+
+    [Header("Combat")]
+    [Tooltip("衝突時のダメージ量")]
+    [SerializeField] private float damage = 100f;
+
+    private Vector3 defaultLocalPos;
+    private Quaternion defaultLocalRot;
 
     protected override void Awake()
     {
         base.Awake();
         npcType = NPCType.Suitcase;
 
-        if (suitcaseObject != null)
+        if (suitcaseVisual == null)
         {
-            defaultSuitcasePosition = suitcaseObject.transform.localPosition;
-            defaultSuitcaseRotation = suitcaseObject.transform.localRotation;
+            Debug.LogError($"{name}: SuitcaseVisual is not assigned.");
+            return;
         }
+
+        defaultLocalPos = suitcaseVisual.transform.localPosition;
+        defaultLocalRot = suitcaseVisual.transform.localRotation;
     }
 
     private void OnEnable()
     {
-        if (suitcaseObject != null)
-        {
-            suitcaseObject.SetActive(true);
-            suitcaseObject.transform.SetParent(this.transform);
-            suitcaseObject.transform.localPosition = defaultSuitcasePosition;
-            suitcaseObject.transform.localRotation = defaultSuitcaseRotation;
+        if (suitcaseVisual == null) return;
 
-            if (suitcaseObject.TryGetComponent<Rigidbody2D>(out var sRb))
-            {
-                sRb.simulated = false;
-                sRb.velocity = Vector2.zero;
-            }
-        }
+        // プール復帰時のリセット処理
+        suitcaseVisual.SetActive(true);
+        suitcaseVisual.transform.SetParent(transform);
+        suitcaseVisual.transform.localPosition = defaultLocalPos;
+        suitcaseVisual.transform.localRotation = defaultLocalRot;
+        suitcaseVisual.layer = gameObject.layer;
+
+        // 残存コンポーネントの削除
+        if (suitcaseVisual.TryGetComponent<SuitcaseProjectile>(out var proj)) DestroyImmediate(proj);
+        if (suitcaseVisual.TryGetComponent<Rigidbody2D>(out var rb)) DestroyImmediate(rb);
+        if (suitcaseVisual.TryGetComponent<BoxCollider2D>(out var col)) DestroyImmediate(col);
     }
 
-    /// <summary>
-    /// 衝撃処理のオーバーライド
-    /// スーツケースを分離し、衝撃の方向へ射出する
-    /// </summary>
     public override void TakeImpact(Vector2 impactForce, GameObject instigator)
     {
         if (currentState == NPCState.KnockedDown) return;
 
-        // スーツケースの発射処理
-        if (suitcaseObject != null && suitcaseObject.transform.parent == this.transform)
+        if (impactForce.magnitude > fallenThreshold)
         {
-            DetachAndLaunchSuitcase(impactForce, instigator);
-        }
+            DetachAndSlide(impactForce);
 
-        // 本体の吹き飛び処理（基底クラス）
-        base.TakeImpact(impactForce, instigator);
+            rb.AddForce(impactForce, ForceMode2D.Impulse);
+            HandleDefeat();
+        }
     }
 
-    /// <summary>
-    /// メソッド抽出による可読性向上：スーツケースの切り離しと発射
-    /// </summary>
-    private void DetachAndLaunchSuitcase(Vector2 impactForce, GameObject instigator)
+    private void DetachAndSlide(Vector2 impactForce)
     {
-        suitcaseObject.transform.SetParent(null);
+        if (suitcaseVisual == null) return;
 
-        // コンポーネント取得（なければ追加）の簡略化
-        if (!suitcaseObject.TryGetComponent(out Rigidbody2D sRb)) sRb = suitcaseObject.AddComponent<Rigidbody2D>();
-        if (!suitcaseObject.TryGetComponent(out Collider2D sCol)) sCol = suitcaseObject.AddComponent<BoxCollider2D>();
+        suitcaseVisual.transform.SetParent(null);
 
-        sRb.simulated = true;
-        sRb.constraints = RigidbodyConstraints2D.FreezePositionY | RigidbodyConstraints2D.FreezeRotation;
+        // 物理コンポーネントの設定
+        var rb = suitcaseVisual.AddComponent<Rigidbody2D>();
+        var col = suitcaseVisual.AddComponent<BoxCollider2D>();
+        var projectile = suitcaseVisual.AddComponent<SuitcaseProjectile>();
 
-        // instigatorとの衝突を無視する
-        if (instigator != null && instigator.TryGetComponent<Collider2D>(out var instigatorCol))
+        // レイヤー設定 (Projectile)
+        int layerIndex = LayerMask.NameToLayer("Projectile");
+        if (layerIndex != -1) suitcaseVisual.layer = layerIndex;
+
+        // 滑走挙動の設定
+        rb.gravityScale = 1f;
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+        rb.drag = groundFriction;
+
+        Physics2D.IgnoreCollision(col, GetComponent<Collider2D>());
+
+        // 進行方向の決定
+        float dirX = Mathf.Sign(impactForce.x);
+        if (Mathf.Abs(impactForce.x) < 0.1f)
         {
-            Physics2D.IgnoreCollision(sCol, instigatorCol, true);
+            dirX = (Random.value > 0.5f) ? 1f : -1f;
         }
 
-        // プロジェクタイル化
-        if (!suitcaseObject.TryGetComponent(out SuitcaseProjectile projectile))
-            projectile = suitcaseObject.AddComponent<SuitcaseProjectile>();
-
-        // --- 方向計算の最適化 ---
-        // 衝撃力(impactForce)の方向を利用する。
-        // 衝撃がほぼ垂直(0に近い)場合は、加害者との位置関係から方向を算出するフォールバックを入れる
-        float directionX = Mathf.Sign(impactForce.x);
-
-        if (Mathf.Abs(impactForce.x) < 0.1f && instigator != null)
-        {
-            // 加害者が左にいたら右へ(1)、右にいたら左へ(-1)
-            directionX = Mathf.Sign(suitcaseObject.transform.position.x - instigator.transform.position.x);
-        }
-
-        Vector2 launchVelocity = new Vector2(directionX * shootForce, 0f);
-        projectile.Launch(launchVelocity);
+        // 水平方向へ射出
+        Vector2 velocity = new Vector2(dirX * slideSpeed, 0f);
+        projectile.Initialize(velocity, gameObject, damage);
     }
 }

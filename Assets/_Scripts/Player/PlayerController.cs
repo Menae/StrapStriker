@@ -45,6 +45,10 @@ public class PlayerController : MonoBehaviour
     [Tooltip("ゲーム開始後、入力受付を開始するまでの待機時間（秒）")]
     public float inputDelayAfterStart = 0.5f;
 
+    [Header("■ センサー補正")]
+    [Tooltip("デバイスの取り付け角度のズレを補正する値。M5使用時に真下でログが270になるよう調整する。")]
+    public float angleCalibrationOffset = 0f;
+
     [Header("■ デバイス軸マッピング設定")]
     [Tooltip("角度計算の「横成分(X)」として使用するM5StickCの加速度軸")]
     public M5Axis accelHorizontalAxis = M5Axis.PlusX;
@@ -88,6 +92,17 @@ public class PlayerController : MonoBehaviour
     public float powerToSwingMultiplier = 0.1f;
     [Tooltip("パワーが自然減衰するレート")]
     public float swayDecayRate = 5f;
+
+    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+    // ここを変更しました：カーブを削除し、手動設定用の変数を追加
+    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+    [Header("■ アニメーション調整 (手動設定)")]
+    [Tooltip("SwayTimeを 0.0 にしたい時の角度（実行中にログを見て数値を入力してください）")]
+    public float swayAngleAtZero = -60f;
+
+    [Tooltip("SwayTimeを 1.0 にしたい時の角度（実行中にログを見て数値を入力してください）")]
+    public float swayAngleAtOne = 60f;
+    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 
     [Header("■ 発射・空中制御")]
     [Tooltip("パワーを発射速度に変換する倍率")]
@@ -144,6 +159,7 @@ public class PlayerController : MonoBehaviour
     // ====================================================================
     // 内部状態変数
     // ====================================================================
+    // (以下、変更なしのため省略しますが、コードに含める場合はそのまま記述してください)
 
     // コンポーネント参照
     private Rigidbody2D rb;
@@ -154,18 +170,18 @@ public class PlayerController : MonoBehaviour
     // 状態管理
     private PlayerState currentState = PlayerState.Idle;
     private HangingStrap currentStrap = null;
-    private float swayPower = 0f; // 描画や互換性のために残すが、ロジックは swingStage に依存する
-    private float lastFacingDirection = 1f; // 1=右, -1=左
+    private float swayPower = 0f;
+    private float lastFacingDirection = 1f;
     private float gameStartTime = -1f;
 
     // DirectControl / ステージ管理用変数
-    private int currentSwingStage = 0;          // 現在の勢いステージ
-    private float lastAngleDifference = 0f;     // 前フレームの角度差分（中心交差判定用）
-    private float maxAmplitudeInCurrentSwing = 0f; // 現在の振幅の最大値
-    private float timeSinceLastValidSwing = 0f; // 減衰タイマー
+    private int currentSwingStage = 0;
+    private float lastAngleDifference = 0f;
+    private float maxAmplitudeInCurrentSwing = 0f;
+    private float timeSinceLastValidSwing = 0f;
 
     // 入力制御・M5StickCデータ
-    private float currentDeviceAngle = 0f;  // 加速度から算出した現在の傾き
+    private float currentDeviceAngle = 0f;
     private bool wasGripInputActiveLastFrame = false;
     private float timeSinceGripLow = 0f;
 
@@ -181,7 +197,16 @@ public class PlayerController : MonoBehaviour
     private const float MinLaunchPower = 1f;
     private Coroutine grabToSwayCoroutine;
     private bool hasBattery = false;
-    private bool wasGroundedLastFrame = true; // 着地検出用
+    private bool wasGroundedLastFrame = true;
+
+    // アニメーションのスムージング用変数
+    private float currentSwayTime = 0.5f;
+
+    // 発射直後の接地判定を無効化するためのタイマー
+    private float launchGraceTimer = 0f;
+
+    // 角度の「180度またぎ」を防止するための累積角度保持用
+    private float continuousAngle = 0f;
 
     /// <summary>
     /// 初期化処理。コンポーネントの参照を取得する。
@@ -302,13 +327,21 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     void FixedUpdate()
     {
+        // 発射直後の猶予タイマー更新
+        if (launchGraceTimer > 0f)
+        {
+            launchGraceTimer -= Time.fixedDeltaTime;
+        }
+
         if (currentState == PlayerState.Grabbing || currentState == PlayerState.Swaying)
         {
             ExecuteSwayingPhysics();
         }
         else if (currentState == PlayerState.Launched)
         {
-            if (IsGrounded())
+            // 猶予タイマーが0以下の場合のみ、接地判定を行う
+            // これにより、爆発直後に即着地してしまうのを防ぐ
+            if (launchGraceTimer <= 0f && IsGrounded())
             {
                 ChangeState(PlayerState.Idle);
                 rb.rotation = 0f;
@@ -432,62 +465,58 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>
     /// スイング中の演算を実行するメソッド。
-    /// DirectControlモードでは「勢いステージ制」を採用。
-    /// プレイヤーが中心点(270度)を勢いよく通過するたびにステージが上昇し、
-    /// 発射時のパワーが蓄積される。
+    /// キーボード入力とM5入力を「真下=270度」基準で統一して処理する。
     /// </summary>
     private void ExecuteSwayingPhysics()
     {
-        // デバイス未接続時は、デバッグモードでない限り処理を中断する
-        if ((ArduinoInputManager.instance == null || !ArduinoInputManager.instance.IsConnected) && !debugMode) return;
+        // デバイス未接続かつデバッグモードOFFなら何もしない
+        bool isM5Connected = (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected);
+        if (!isM5Connected && !debugMode) return;
 
         // =================================================================
-        // 1. デバイスの傾き角度の算出
+        // 1. デバイス角度(0～360度)の算出
+        //    目標：つり革を真下に垂らした状態 = 270.0度 になるようにする
         // =================================================================
 
-        float inputAngle = 0f;
-        bool isDebugKeyInput = false;
+        float inputAngle = 270f; // デフォルトは真下
 
-        if (debugMode && (ArduinoInputManager.instance == null || !ArduinoInputManager.instance.IsConnected))
+        // --- A. キーボード入力 (デバッグ用) ---
+        if (debugMode && !isM5Connected)
         {
-            // デバッグ用: キーボード入力
+            // 右キー(正)入力で角度を減らす(時計回り)、左キー(負)で増やす(反時計回り)
             float input = Input.GetAxisRaw("Horizontal");
             inputAngle = 270f - (input * swayMaxAngle);
-
-            if (Mathf.Abs(input) > 0.1f)
-            {
-                isDebugKeyInput = true;
-            }
         }
-        else
+        // --- B. M5StickC入力 (本番用) ---
+        else if (isM5Connected)
         {
-            // インスペクタで指定された軸設定に基づき、加速度成分を取得
             Vector3 rawAccel = ArduinoInputManager.RawAccel;
             float accelX = GetAxisValue(accelHorizontalAxis, rawAccel);
             float accelY = GetAxisValue(accelVerticalAxis, rawAccel);
 
-            // Atan2(y, x) で角度算出 (右=0, 上=90, 左=180, 下=-90)
-            float calculatedAngle = Mathf.Atan2(accelY, accelX) * Mathf.Rad2Deg;
+            // Atan2で角度算出 (右=0, 上=90, 左=180, 下=-90)
+            float rawAngle = Mathf.Atan2(accelY, accelX) * Mathf.Rad2Deg;
 
-            // 0〜360度に正規化 (下=270度)
-            if (calculatedAngle < 0f)
-            {
-                calculatedAngle += 360f;
-            }
+            // 0～360度に正規化
+            if (rawAngle < 0f) rawAngle += 360f;
 
-            inputAngle = calculatedAngle;
+            // 補正値を適用
+            inputAngle = rawAngle + angleCalibrationOffset;
         }
 
+        // 最終的な正規化 (0～360)
+        inputAngle = Mathf.Repeat(inputAngle, 360f);
         currentDeviceAngle = inputAngle;
 
+        //★デバッグ用：このログが、キーボード操作なし/M5真下持ち の時に「270.0」になるのが正解
+        Debug.Log($"CurrentAngle: {currentDeviceAngle:F1} (Target: 270.0)");
 
         // =================================================================
         // 2. 基準角度（270度）からの変位量を計算
+        //    DeltaAngleを使うことで、359度と1度の境目なども正しく計算できる
         // =================================================================
 
-        float angleDifference = Mathf.DeltaAngle(0f, inputAngle);
-
-        Debug.Log($"現在の生角度: {inputAngle:F1} | 左右のズレ: {angleDifference:F1}");
+        float angleDifference = Mathf.DeltaAngle(270f, currentDeviceAngle);
 
         if (invertDirectControl)
         {
@@ -495,36 +524,45 @@ public class PlayerController : MonoBehaviour
         }
 
         // =================================================================
-        // 3. DirectControl (ステージ制スイングロジック)
+        // 3. 姿勢制御と勢い計算 (共通ロジック)
         // =================================================================
         if (useDirectControl)
         {
             // --- 姿勢制御 ---
+            // 角度制限 (SwayMaxAngle)
             float clampedDifference = Mathf.Clamp(angleDifference, -swayMaxAngle, swayMaxAngle);
+
+            // ターゲット角度を決定 (270度基準)
             float targetAngle = 270f + clampedDifference;
 
+            // Rigidbodyを回転させる
             float currentZ = transform.eulerAngles.z;
             float newZ = Mathf.LerpAngle(currentZ, targetAngle, Time.fixedDeltaTime * directControlSmoothSpeed);
             rb.MoveRotation(newZ);
             rb.angularVelocity = 0f;
 
             // --- 勢い（ステージ）判定 ---
-            if (isDebugKeyInput)
+            // キーボード入力時は常に最大ステージとする（デバッグのしやすさ重視）
+            bool isKeyInputActive = (debugMode && !isM5Connected && Mathf.Abs(Input.GetAxisRaw("Horizontal")) > 0.1f);
+
+            if (isKeyInputActive)
             {
                 currentSwingStage = maxSwingStages;
                 timeSinceLastValidSwing = 0f;
             }
             else
             {
+                // M5入力時のロジック
                 if (Mathf.Abs(clampedDifference) > maxAmplitudeInCurrentSwing)
                 {
                     maxAmplitudeInCurrentSwing = Mathf.Abs(clampedDifference);
                 }
 
+                // 中心（差分0）をまたいだかどうか
                 bool crossedCenter = (Mathf.Sign(lastAngleDifference) != Mathf.Sign(clampedDifference));
 
                 float currentAngularVelocity = 0f;
-                if (ArduinoInputManager.instance != null)
+                if (isM5Connected)
                 {
                     currentAngularVelocity = Mathf.Abs(GetAxisValue(gyroRotationAxis, ArduinoInputManager.RawGyro));
                 }
@@ -539,7 +577,7 @@ public class PlayerController : MonoBehaviour
                         if (currentSwingStage < maxSwingStages)
                         {
                             currentSwingStage++;
-                            Debug.Log($"<color=cyan>Swing Stage UP!</color> Lv.{currentSwingStage}");
+                            // Debug.Log($"<color=cyan>Swing Stage UP!</color> Lv.{currentSwingStage}");
                         }
                         timeSinceLastValidSwing = 0f;
                     }
@@ -547,19 +585,22 @@ public class PlayerController : MonoBehaviour
                 }
             }
 
-            if (!isDebugKeyInput)
+            // 減衰処理
+            if (!isKeyInputActive)
             {
                 timeSinceLastValidSwing += Time.deltaTime;
                 if (timeSinceLastValidSwing > stageDecayTime && currentSwingStage > 0)
                 {
                     currentSwingStage--;
                     timeSinceLastValidSwing = 0f;
-                    Debug.Log($"<color=orange>Swing Stage Decay...</color> Lv.{currentSwingStage}");
+                    // Debug.Log($"<color=orange>Swing Stage Decay...</color> Lv.{currentSwingStage}");
                 }
             }
 
+            // ステージをSwayPowerに反映
             float stageRatio = (float)currentSwingStage / (float)maxSwingStages;
             swayPower = stageRatio * maxSwayPower;
+
             lastAngleDifference = clampedDifference;
             return;
         }
@@ -579,7 +620,7 @@ public class PlayerController : MonoBehaviour
                 ChangeState(PlayerState.Swaying);
                 inputTorque = horizontalInput * swayForceByAngle;
 
-                // 【修正点】キー入力中はパワーを加算する
+                // キー入力中はパワーを加算する
                 swayPower = Mathf.Min(maxSwayPower, swayPower + swayIncreaseRate * Time.fixedDeltaTime);
             }
             else
@@ -880,15 +921,23 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // デバッグ用：再帰呼び出しの深さを測るカウンター（静的変数）
+    private static int debugRecursionDepth = 0;
+
+    private bool isExploding = false;
+
     /// <summary>
     /// モバイルバッテリーを装備する。
     /// BatteryStudentControllerから呼び出される。
     /// </summary>
     public void EquipBattery()
     {
+        // すでに爆発処理中、あるいはすでにバッテリーを持っている場合は重複処理しない
+        if (isExploding || hasBattery) return;
+
         hasBattery = true;
-        // 視覚的にわかりやすくするため、ここでプレイヤーの色を変えたりパーティクルを出しても良い
-        Debug.Log("<color=yellow>Player equipped Mobile Battery!</color>");
+
+        Debug.Log("<color=yellow>Battery Equipped!</color>");
     }
 
     /// <summary>
@@ -897,49 +946,44 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     private void ExplodeBattery()
     {
-        hasBattery = false; // 消費
+        if (isExploding) return; // 二重発火防止
+        isExploding = true;
 
-        Debug.Log("<color=red>Battery Explosion!</color>");
-
-        // 1. 周囲のNPCを巻き込む
-        Collider2D[] hitColliders = Physics2D.OverlapCircleAll(transform.position, batteryExplosionRadius);
-
-        foreach (var hitCollider in hitColliders)
+        try
         {
-            // 自分自身は巻き込まない
-            if (hitCollider.gameObject == this.gameObject) continue;
+            hasBattery = false;
+            Debug.Log("<color=red>Battery Explosion!</color>");
 
-            // 【修正】TryGetComponentで安全に取得
-            if (hitCollider.TryGetComponent<NPCController>(out var npc))
+            // 範囲内のNPCを取得
+            Collider2D[] hitColliders = Physics2D.OverlapCircleAll(transform.position, batteryExplosionRadius);
+
+            foreach (var hitCollider in hitColliders)
             {
-                // 爆心地からの方向ベクトル算出
-                Vector2 direction = (npc.transform.position - transform.position).normalized;
-                // 少し上向きに飛ばす補正（吹き飛びの気持ちよさ重視）
-                direction += Vector2.up * 0.5f;
+                if (hitCollider.gameObject == this.gameObject) continue;
 
-                // すべて掛け合わせた最終的な爆発力(Impulse)を渡す
-                // 基礎威力(10f) * 倍率 * 方向
-                Vector2 explosionForce = direction.normalized * 10f * batteryExplosionImpactMultiplier;
+                if (hitCollider.TryGetComponent<NPCController>(out var npc))
+                {
+                    Vector2 direction = (npc.transform.position - transform.position).normalized;
+                    direction += Vector2.up * 0.5f;
+                    Vector2 explosionForce = direction.normalized * 10f * batteryExplosionImpactMultiplier;
 
-                npc.TakeImpact(explosionForce, this.gameObject);
+                    npc.TakeImpact(explosionForce, this.gameObject);
+                }
             }
+
+            // プレイヤーの挙動設定
+            float boostDirectionX = (lastFacingDirection != 0) ? lastFacingDirection : 1f;
+            Vector2 boostDir = new Vector2(boostDirectionX, 0.5f).normalized;
+            rb.AddForce(boostDir * batteryExplosionSelfForce, ForceMode2D.Impulse);
+
+            launchGraceTimer = 0.2f;
+            if (batteryExplosionEffect != null) Instantiate(batteryExplosionEffect, transform.position, Quaternion.identity);
+            ChangeState(PlayerState.Launched);
         }
-
-        // 2. プレイヤー自身を前方に吹き飛ばす（反動移動）
-        // 向きが0（停止中）の場合は右(1)をデフォルトとする
-        float boostDirectionX = (lastFacingDirection != 0) ? lastFacingDirection : 1f;
-        Vector2 boostDir = new Vector2(boostDirectionX, 0.5f).normalized;
-
-        rb.AddForce(boostDir * batteryExplosionSelfForce, ForceMode2D.Impulse);
-
-        // 3. エフェクト生成
-        if (batteryExplosionEffect != null)
+        finally
         {
-            Instantiate(batteryExplosionEffect, transform.position, Quaternion.identity);
+            isExploding = false; // 必ず最後にフラグを下ろす
         }
-
-        // 爆発の勢いでLaunched状態へ移行
-        ChangeState(PlayerState.Launched);
     }
 
     /// <summary>

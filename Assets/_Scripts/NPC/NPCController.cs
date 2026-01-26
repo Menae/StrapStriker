@@ -4,7 +4,8 @@ using UnityEngine;
 public class NPCController : MonoBehaviour
 {
     [Header("NPC設定")]
-    public NPCType npcType = NPCType.Normal;
+    [Tooltip("プーリング識別用")]
+    public NPCType npcType = NPCType.NormalA;
 
     protected enum NPCState { Idle, KnockedDown }
     protected NPCState currentState = NPCState.Idle;
@@ -12,14 +13,14 @@ public class NPCController : MonoBehaviour
     [Header("パーソナルスペースAI設定")]
     public float personalSpaceRadius = 0.5f;
     public float separationForce = 1.0f;
-
-    // GC Allocationを防ぐためのバッファ
     private readonly Collider2D[] _nearCollidersBuffer = new Collider2D[10];
 
     [Header("物理リアクション設定")]
-    public float satThreshold = 5.0f;
+    [Tooltip("この衝撃値を超えるとダウンする（これ未満なら微動だにしない）")]
     public float fallenThreshold = 40f;
-    public float recoveryTime = 3.0f;
+
+    [Tooltip("NPCの重さ (RigidbodyのMassに適用)")]
+    public float weight = 1.0f;
 
     [Header("消滅設定")]
     public float timeBeforeFade = 2.0f;
@@ -32,9 +33,7 @@ public class NPCController : MonoBehaviour
     protected StageManager stageManager;
     protected bool isActivated = false;
 
-    // Animatorパラメータのハッシュ化
     protected static readonly int AnimHashFallen = Animator.StringToHash("Fallen");
-    protected static readonly int AnimHashSat = Animator.StringToHash("Sat");
 
     protected virtual void Awake()
     {
@@ -43,14 +42,17 @@ public class NPCController : MonoBehaviour
         visualSprite = GetComponentInChildren<SpriteRenderer>();
         animator = GetComponentInChildren<Animator>();
 
-        if (rb != null) rb.centerOfMass = new Vector2(0, 0.5f);
+        if (rb != null)
+        {
+            rb.centerOfMass = new Vector2(0, 0.5f);
+            rb.mass = weight; // 重さを適用
+        }
     }
 
     protected virtual void OnDisable()
     {
         StopAllCoroutines();
         currentState = NPCState.Idle;
-        // 色のリセット処理
         if (visualSprite != null)
         {
             var c = visualSprite.color;
@@ -60,20 +62,17 @@ public class NPCController : MonoBehaviour
 
     protected virtual void FixedUpdate()
     {
+        // 倒れていない時のみ、重なり防止の微弱な力をかける
         if (currentState == NPCState.Idle && isActivated)
         {
             PerformSeparation();
         }
     }
 
-    // 分離ロジックをメソッド抽出
     private void PerformSeparation()
     {
         int layerMask = LayerMask.GetMask("NPC");
-
-        // NonAllocを使用してGCを回避
         int count = Physics2D.OverlapCircleNonAlloc(transform.position, personalSpaceRadius, _nearCollidersBuffer, layerMask);
-
         if (count == 0) return;
 
         Vector2 totalSeparationForce = Vector2.zero;
@@ -83,9 +82,7 @@ public class NPCController : MonoBehaviour
         {
             var otherCol = _nearCollidersBuffer[i];
             if (otherCol.gameObject == gameObject) continue;
-
             float distance = Vector2.Distance(transform.position, otherCol.transform.position);
-            // ゼロ除算対策
             if (distance <= Mathf.Epsilon) continue;
 
             float strength = 1.0f - (distance / personalSpaceRadius);
@@ -96,7 +93,7 @@ public class NPCController : MonoBehaviour
 
         if (separationCount > 0)
         {
-            totalSeparationForce.y = 0; // 横軸のみに制限
+            totalSeparationForce.y = 0;
             rb.AddForce(totalSeparationForce * separationForce);
         }
     }
@@ -114,9 +111,7 @@ public class NPCController : MonoBehaviour
 
     public void Deactivate()
     {
-        // 既に倒れている場合は物理演算を残す等の判断が必要ならここに記述
         if (currentState == NPCState.KnockedDown) return;
-
         isActivated = false;
         rb.simulated = false;
         this.enabled = false;
@@ -124,25 +119,24 @@ public class NPCController : MonoBehaviour
     }
 
     /// <summary>
-    /// 衝撃処理
-    /// 呼び出し元で計算済みの「最終的な衝撃ベクトル」と「加害者」を受け取る
+    /// 閾値を超えた時だけ AddForce と ダウン処理を行う。
     /// </summary>
     public virtual void TakeImpact(Vector2 impactForce, GameObject instigator)
     {
         if (currentState == NPCState.KnockedDown) return;
 
         float impactMagnitude = impactForce.magnitude;
-        rb.AddForce(impactForce, ForceMode2D.Impulse);
 
+        // 閾値判定
         if (impactMagnitude > fallenThreshold)
         {
+            // 閾値を超えた：吹っ飛んでダウン
+            rb.AddForce(impactForce, ForceMode2D.Impulse);
             HandleDefeat();
         }
-        else if (impactMagnitude > satThreshold)
+        else
         {
-            currentState = NPCState.KnockedDown;
-            animator.SetTrigger(AnimHashSat);
-            StartCoroutine(SatRecoveryRoutine());
+            // 閾値以下：微動だにしない
         }
     }
 
@@ -155,14 +149,11 @@ public class NPCController : MonoBehaviour
         }
 
         currentState = NPCState.KnockedDown;
-        animator.SetTrigger(AnimHashFallen);
-        StartCoroutine(FadeOutAndDespawnRoutine());
-    }
 
-    protected IEnumerator SatRecoveryRoutine()
-    {
-        yield return new WaitForSeconds(recoveryTime);
-        currentState = NPCState.Idle;
+        // アニメーションは Fallen のみ
+        if (animator != null) animator.SetTrigger(AnimHashFallen);
+
+        StartCoroutine(FadeOutAndDespawnRoutine());
     }
 
     protected IEnumerator FadeOutAndDespawnRoutine()
@@ -171,7 +162,6 @@ public class NPCController : MonoBehaviour
 
         float timer = 0f;
         Color startColor = visualSprite.color;
-
         while (timer < fadeDuration)
         {
             timer += Time.deltaTime;
