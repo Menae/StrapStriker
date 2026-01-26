@@ -90,6 +90,16 @@ public class LocalizationManager : MonoBehaviour
                 { Language.Japanese, "英語で開始しますか？" },
                 { Language.English, "Start in English?" }
             } },
+
+            { "calib_start_msg", new Dictionary<Language, string> {
+                { Language.Japanese, "センサーの調整を行います" },
+                { Language.English, "Calibrating Sensors..." }
+            } },
+
+            { "calib_prepare_format", new Dictionary<Language, string> {
+                { Language.Japanese, "{0}\n<size=80%>計測開始まで {1:F0} 秒</size>" },
+                { Language.English, "{0}\n<size=80%>Starts in {1:F0} sec</size>" }
+            } },
         };
     }
 

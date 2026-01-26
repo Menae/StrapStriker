@@ -67,18 +67,14 @@ public class StageManager : MonoBehaviour
     [Header("■ 慣性設定")]
     public float inertiaForce = 10f;
 
-    // ---------------------------------------------------------
-    // 混雑率設定 (内部計算用・表示なし)
-    // ---------------------------------------------------------
-    [Header("■ 混雑率設定 (ロジックのみ)")]
+    [Header("■ 混雑率設定 (ロジック)")]
     [Tooltip("初期の混雑率")]
     public float initialCongestionRate = 100f;
-    [Tooltip("ゲームオーバーになる混雑率")]
+    [Tooltip("ゲームオーバーになる混雑率（ゲージ最大値）")]
     public float maxCongestionRate = 300f;
     [Tooltip("NPCが1人減るごとに減少する混雑率")]
     public float rateDecreasePerNpc = 1.5f;
 
-    // 外部（メーターUI等）から参照するためのプロパティ
     public float CurrentCongestionRate => currentCongestionRate;
 
     [Header("▼ オーバーロード設定")]
@@ -92,49 +88,36 @@ public class StageManager : MonoBehaviour
     [Header("■ ステージイベント設定")]
     public List<StationEvent> stationEvents;
 
-    // ---------------------------------------------------------
-    // UI参照：基本UIコンテナ (ここを追加・復活)
-    // ---------------------------------------------------------
+    [Header("■ 混雑率ゲージUI")]
+    [Tooltip("日本語版のゲージ中身（Image Type: Filledにしておくこと）")]
+    public Image congestionFillJP;
+    [Tooltip("英語版のゲージ中身")]
+    public Image congestionFillEN;
+
     [Header("■ UIコンテナ (言語別・常時表示要素)")]
-    [Tooltip("日本語環境で常時表示するUIの親オブジェクト（スコア盤など）")]
     public GameObject uiContainerJP;
-    [Tooltip("英語環境で常時表示するUIの親オブジェクト")]
     public GameObject uiContainerEN;
 
-    // ---------------------------------------------------------
-    // UI参照：パネル (共通仕様)
-    // ---------------------------------------------------------
-    [Header("■ パネル (言語共通・TMP切り替え想定)")]
+    [Header("■ パネル (言語共通)")]
     public GameObject tutorialPanel;
     public GameObject pauseMenuPanel;
     public GameObject gameOverPanel;
-    public GameObject clearPanel; // ResultUIがない場合の予備
+    public GameObject clearPanel;
 
-    // ---------------------------------------------------------
-    // UI参照：駅名 (言語別TMP)
-    // ---------------------------------------------------------
-    [Header("■ 駅名表示 (言語別オブジェクト)")]
-    [Tooltip("日本語表示用のTMPオブジェクト")]
+    [Header("■ 駅名表示 (言語別TMP)")]
     public TextMeshProUGUI stationNameTextJP;
-    [Tooltip("英語表示用のTMPオブジェクト")]
     public TextMeshProUGUI stationNameTextEN;
 
-    // ---------------------------------------------------------
-    // UI参照：ステータス表示 (言語別画像)
-    // ---------------------------------------------------------
     [Header("■ ステータス表示 (日本語)")]
-    public GameObject statusJP_Decelerating; // 減速中
-    public GameObject statusJP_Stopped;      // 停車中
-    public GameObject statusJP_Accelerating; // 加速中
+    public GameObject statusJP_Decelerating;
+    public GameObject statusJP_Stopped;
+    public GameObject statusJP_Accelerating;
 
     [Header("■ ステータス表示 (英語)")]
-    public GameObject statusEN_Decelerating; // DECELERATING
-    public GameObject statusEN_Stopped;      // STOPPED
-    public GameObject statusEN_Accelerating; // ACCELERATING
+    public GameObject statusEN_Decelerating;
+    public GameObject statusEN_Stopped;
+    public GameObject statusEN_Accelerating;
 
-    // ---------------------------------------------------------
-    // その他 共通UI・設定
-    // ---------------------------------------------------------
     [Header("■ 共通UI")]
     public TextMeshProUGUI defeatedNpcCountText;
 
@@ -156,6 +139,7 @@ public class StageManager : MonoBehaviour
     public ResultUIController resultUI;
     public ParallaxController parallaxController;
     public DoorManager doorController;
+    public GameOverUIController gameOverUI;
 
     [Header("■ 評価基準")]
     public int rankThreshold2Stars = 10;
@@ -257,6 +241,8 @@ public class StageManager : MonoBehaviour
         if (CurrentState == GameState.Playing)
         {
             CheckOverloadStatus();
+
+            UpdateCongestionGauge();
         }
 
         if (CurrentState == GameState.Playing || CurrentState == GameState.Paused)
@@ -421,11 +407,31 @@ public class StageManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// ゲームオーバー時の処理。
+    /// 診断ログを追加し、なぜUIコントローラーが動かないかを可視化します。
+    /// </summary>
     private void TriggerGameOver()
     {
         CurrentState = GameState.GameOver;
         Time.timeScale = 0f;
-        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+
+        // ここで接続チェック
+        if (gameOverUI != null)
+        {
+            Debug.Log("StageManager: <color=green>Connection OK.</color> Calling GameOverUI.ShowGameOver()...");
+            gameOverUI.ShowGameOver();
+        }
+        else
+        {
+            Debug.LogError("StageManager: <color=red>GameOverUI is NOT assigned in Inspector!</color> Using fallback legacy panel.");
+
+            // 予備のパネル表示（これしか動いていない可能性が高い）
+            if (gameOverPanel != null)
+            {
+                gameOverPanel.SetActive(true);
+            }
+        }
     }
 
     public void RetryStage()
@@ -577,6 +583,30 @@ public class StageManager : MonoBehaviour
         else
         {
             if (clearPanel != null) clearPanel.SetActive(true);
+        }
+    }
+
+    /// <summary>
+    /// 現在の混雑率に基づいてゲージの表示（FillAmount）を更新する。
+    /// </summary>
+    private void UpdateCongestionGauge()
+    {
+        // 0.0 〜 1.0 の割合を計算
+        float fillRatio = Mathf.Clamp01(currentCongestionRate / maxCongestionRate);
+
+        if (isEnglishMode)
+        {
+            if (congestionFillEN != null)
+            {
+                congestionFillEN.fillAmount = fillRatio;
+            }
+        }
+        else
+        {
+            if (congestionFillJP != null)
+            {
+                congestionFillJP.fillAmount = fillRatio;
+            }
         }
     }
 

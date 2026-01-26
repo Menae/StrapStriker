@@ -226,25 +226,29 @@ public class TitleFlowManager : MonoBehaviour
 
     /// <summary>
     /// 状態遷移時の入力ロックおよび後処理を管理するコルーチン。
-    /// 手が離れるまで遷移を待機することでチャタリングや誤操作を防止する。
+    /// レスポンス向上のため、入力検知後「即座に」描画を更新し、その後に待機時間を設ける。
     /// </summary>
     private IEnumerator StateTransitionRoutine(TitleState newState)
     {
+        // 1. 先に入力をロックする
         isInputLocked = true;
 
-        // 物理的な入力解除を待機
-        while (CheckGripInput()) yield return null;
-
-        yield return new WaitForSeconds(stateChangeCooldown);
-
+        // 2. 即座にステートと見た目を更新する
         currentState = newState;
 
         // 状態遷移時にデフォルト位置（YES）へリセット
         if (newState == TitleState.ConfirmStart) isYesSelected = true;
 
-        // 【重要】状態確定後に全UIをリフレッシュし、古い表示をクリーンアップ
+        // 画面切り替え実行
         UpdateVisuals();
 
+        // 3. 見た目が変わった後にクールダウン（0.5秒）を置く
+        yield return new WaitForSeconds(stateChangeCooldown);
+
+        // 4. 誤操作防止：物理的に手が離れるまで待機
+        while (CheckGripInput()) yield return null;
+
+        // ロック解除
         isInputLocked = false;
     }
 

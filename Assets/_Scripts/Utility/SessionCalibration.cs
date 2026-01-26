@@ -4,58 +4,42 @@ using TMPro;
 using System.Collections;
 
 /// <summary>
-/// プレイ開始ごとにセンサーのキャリブレーションを実行するクラス。
-/// 2本の銅箔テープ（センサー1, センサー2）それぞれの「握った状態」と「離した状態」を計測し、
-/// そのセッション専用の閾値を設定する。
+/// プレイ開始時にセンサーのキャリブレーション（補正）を実行するクラス。
+/// センサーの個体差や環境湿度による入力値のオフセットを吸収するため、
+/// 実際の入力値（最小値・最大値）を計測し、動的に判定閾値を設定する。
 /// </summary>
 public class SessionCalibration : MonoBehaviour
 {
-    [Header("UI参照")]
-    [Tooltip("プレイヤーへの操作指示や計測状況を表示するテキスト")]
+    [Header("UI Reference")]
+    [Tooltip("操作指示や計測状況を表示するテキスト")]
     public TextMeshProUGUI instructionText;
-
-    [Tooltip("現在の信号レベルを可視化するスライダー（デバッグ確認用）")]
+    [Tooltip("現在の信号レベル確認用スライダー")]
     public Slider signalSlider;
-
-    [Tooltip("キャリブレーション中にゲーム画面を覆うパネル")]
+    [Tooltip("キャリブレーション中の入力ブロック用パネル")]
     public GameObject overlayPanel;
 
-    [Header("連携参照")]
-    [Tooltip("計測結果（閾値）を適用するPlayerController")]
+    [Header("System Reference")]
     public PlayerController playerController;
-
-    [Tooltip("キャリブレーション完了後にチュートリアルを開始するStageManager")]
     public StageManager stageManager;
 
-    [Header("計測設定")]
-    [Tooltip("判定を確定させるために、状態を維持しなければならない時間（秒）")]
+    [Header("Measurement Settings")]
+    [Tooltip("計測を行う時間（秒）。この間の平均値を採用する")]
     public float measureDuration = 2.0f;
+    [Tooltip("計測開始前の準備待機時間（秒）。指示が出てから計測を始めるまでの猶予")]
+    public float prepareDuration = 5.0f;
 
-    [Tooltip("「握っている」と判定する信号値の閾値。両方のセンサーがこの値を上回り続ける必要がある。")]
-    public float waitOnThreshold = 1000f;
-
-    [Tooltip("「離している」と判定する信号値の閾値。両方のセンサーがこの値を下回り続ける必要がある。")]
-    public float waitOffThreshold = 500f;
-
-    [Header("デバッグ設定")]
-    [Tooltip("Arduino未接続時にスペースキーで代用する際の仮想信号値")]
+    [Header("Debug")]
+    [Tooltip("Arduino未接続時のデバッグ用仮想値")]
     public float debugVirtualValue = 3000f;
 
-    /// <summary>
-    /// シーン開始時にキャリブレーションシーケンスを開始する。
-    /// </summary>
     private void Start()
     {
         StartCoroutine(CalibrationSequence());
     }
 
-    /// <summary>
-    /// 毎フレーム更新処理。
-    /// 信号値をスライダーに反映し、入力状況を視覚的に確認可能にする。
-    /// UI用には2つのセンサーの平均値を表示する。
-    /// </summary>
     private void Update()
     {
+        // 信号レベルの可視化更新
         if (signalSlider != null)
         {
             signalSlider.value = GetAverageCurrentValue();
@@ -63,8 +47,7 @@ public class SessionCalibration : MonoBehaviour
     }
 
     /// <summary>
-    /// 現在のセンサー値（2つのセンサーの平均）を取得する。
-    /// UI表示用。
+    /// 現在のセンサー値（2系統の平均）を取得する。
     /// </summary>
     private float GetAverageCurrentValue()
     {
@@ -74,38 +57,112 @@ public class SessionCalibration : MonoBehaviour
         {
             return (ArduinoInputManager.instance.SmoothedGripValue1 + ArduinoInputManager.instance.SmoothedGripValue2) / 2f;
         }
-
         return 0f;
     }
 
     /// <summary>
-    /// キャリブレーションのメインフロー制御。
-    /// 言語切り替えに対応するため、直接のテキストではなくキーを指定して指示を表示する。
+    /// キャリブレーションの実行シーケンス。
+    /// 「離す（最小値）」→「握る（最大値）」の順で計測を行い、正常なダイナミックレンジを確保する。
     /// </summary>
     private IEnumerator CalibrationSequence()
     {
-        // ゲーム操作をブロックするためオーバーレイを表示
         if (overlayPanel != null) overlayPanel.SetActive(true);
 
         float timer;
         float sum1, sum2;
         int count;
 
-        // =================================================================
-        // ステップ1: 握る状態（ON）の計測
-        // =================================================================
+        // ---------------------------------------------------------
+        // Step 0: 開始シーケンス
+        // ---------------------------------------------------------
 
+        SetInstruction("calib_start_msg");
+        yield return new WaitForSeconds(1.5f);
+
+
+        // ---------------------------------------------------------
+        // Step 1: 最小値（Release/OFF）の計測
+        // リラックス状態を基準点（ゼロ点）として記録する
+        // ---------------------------------------------------------
+
+        // A. 準備フェーズ（カウントダウン）
         timer = 0f;
-        sum1 = 0f;
-        sum2 = 0f;
-        count = 0;
+        while (timer < prepareDuration)
+        {
+            timer += Time.deltaTime;
+            float remaining = Mathf.Max(0f, prepareDuration - timer);
 
-        // 変更: 日本語を直接書かず、辞書のキーを指定
-        SetInstruction("calib_grip_instruction");
+            string instruction = LocalizationManager.Instance.GetText("calib_release_instruction");
+            SetInstruction("calib_prepare_format", instruction, remaining);
+
+            yield return null;
+        }
+
+        // B. 計測フェーズ
+        timer = 0f;
+        sum1 = 0f; sum2 = 0f;
+        count = 0;
 
         while (timer < measureDuration)
         {
-            // 現在値の取得（Arduino未接続時は0またはデバッグ値）
+            timer += Time.deltaTime;
+
+            float val1 = 0f;
+            float val2 = 0f;
+
+            if (Input.GetKey(KeyCode.Space))
+            {
+                // Spaceキー非押下時は0（離した状態）をシミュレート
+                val1 = 0f; val2 = 0f;
+            }
+            else if (ArduinoInputManager.instance != null)
+            {
+                val1 = ArduinoInputManager.instance.SmoothedGripValue1;
+                val2 = ArduinoInputManager.instance.SmoothedGripValue2;
+            }
+
+            sum1 += val1;
+            sum2 += val2;
+            count++;
+
+            SetInstruction("calib_measuring_release", Mathf.Max(0f, measureDuration - timer));
+            yield return null;
+        }
+
+        // 最小値の確定
+        float offValue1 = (count > 0) ? sum1 / count : 0f;
+        float offValue2 = (count > 0) ? sum2 / count : 0f;
+
+        SetInstruction("calib_ok");
+        yield return new WaitForSeconds(1.0f);
+
+
+        // ---------------------------------------------------------
+        // Step 2: 最大値（Grip/ON）の計測
+        // ---------------------------------------------------------
+
+        // A. 準備フェーズ（カウントダウン）
+        timer = 0f;
+        while (timer < prepareDuration)
+        {
+            timer += Time.deltaTime;
+            float remaining = Mathf.Max(0f, prepareDuration - timer);
+
+            string instruction = LocalizationManager.Instance.GetText("calib_grip_instruction");
+            SetInstruction("calib_prepare_format", instruction, remaining);
+
+            yield return null;
+        }
+
+        // B. 計測フェーズ
+        timer = 0f;
+        sum1 = 0f; sum2 = 0f;
+        count = 0;
+
+        while (timer < measureDuration)
+        {
+            timer += Time.deltaTime;
+
             float val1 = 0f;
             float val2 = 0f;
 
@@ -120,118 +177,56 @@ public class SessionCalibration : MonoBehaviour
                 val2 = ArduinoInputManager.instance.SmoothedGripValue2;
             }
 
-            // 両方のセンサーが閾値を超えているか判定
-            if (val1 >= waitOnThreshold && val2 >= waitOnThreshold)
-            {
-                timer += Time.deltaTime;
-                sum1 += val1;
-                sum2 += val2;
-                count++;
+            sum1 += val1;
+            sum2 += val2;
+            count++;
 
-                float remainingTime = Mathf.Max(0f, measureDuration - timer);
-
-                // 変更: 数値を埋め込むために、第二引数として remainingTime を渡す
-                // 辞書側では "計測中... {0:F1} 秒" のように {0} で受け取る
-                SetInstruction("calib_measuring_grip", remainingTime);
-            }
-            else
-            {
-                timer = 0f;
-                sum1 = 0f;
-                sum2 = 0f;
-                count = 0;
-                // リセット時もキーを指定
-                SetInstruction("calib_grip_instruction");
-            }
-
+            SetInstruction("calib_measuring_grip", Mathf.Max(0f, measureDuration - timer));
             yield return null;
         }
 
-        // 平均値を算出
+        // 最大値の確定
         float onValue1 = (count > 0) ? sum1 / count : debugVirtualValue;
         float onValue2 = (count > 0) ? sum2 / count : debugVirtualValue;
 
-        // 変更: OKメッセージ
-        SetInstruction("calib_ok");
-        yield return new WaitForSeconds(1.0f);
 
+        // ---------------------------------------------------------
+        // Step 3: 値の検証と適用
+        // ---------------------------------------------------------
 
-        // =================================================================
-        // ステップ2: 離す状態（OFF）の計測
-        // =================================================================
-
-        timer = 0f;
-        sum1 = 0f;
-        sum2 = 0f;
-        count = 0;
-
-        // 変更: 手を離す指示
-        SetInstruction("calib_release_instruction");
-
-        while (timer < measureDuration)
-        {
-            float val1 = 0f;
-            float val2 = 0f;
-
-            if (ArduinoInputManager.instance != null && !Input.GetKey(KeyCode.Space))
-            {
-                val1 = ArduinoInputManager.instance.SmoothedGripValue1;
-                val2 = ArduinoInputManager.instance.SmoothedGripValue2;
-            }
-
-            // 両方のセンサーが閾値を下回っているか判定
-            if (val1 < waitOffThreshold && val2 < waitOffThreshold)
-            {
-                timer += Time.deltaTime;
-                sum1 += val1;
-                sum2 += val2;
-                count++;
-
-                float remainingTime = Mathf.Max(0f, measureDuration - timer);
-
-                // 変更: OFF計測中のカウントダウン
-                SetInstruction("calib_measuring_release", remainingTime);
-            }
-            else
-            {
-                timer = 0f;
-                sum1 = 0f;
-                sum2 = 0f;
-                count = 0;
-                // リセット時
-                SetInstruction("calib_release_instruction");
-            }
-
-            yield return null;
-        }
-
-        float offValue1 = (count > 0) ? sum1 / count : 0f;
-        float offValue2 = (count > 0) ? sum2 / count : 0f;
-
-
-        // =================================================================
-        // ステップ3: 計測値の適用とゲーム開始
-        // =================================================================
-
-        // 変更: 完了メッセージ
         SetInstruction("calib_ready");
 
-        // フェイルセーフ: 差分が小さすぎる場合は補正
-        if (Mathf.Abs(onValue1 - offValue1) < 5f) onValue1 = offValue1 + 200f;
-        if (Mathf.Abs(onValue2 - offValue2) < 5f) onValue2 = offValue2 + 200f;
+        // フェイルセーフ:
+        // 入力値の変動幅が小さすぎる場合（未操作や断線等）は強制的にマージンを設ける
+        float minDiff = 200f;
 
-        // PlayerControllerへ4つの値を注入（Min1, Max1, Min2, Max2）
+        if ((onValue1 - offValue1) < minDiff)
+        {
+            Debug.LogWarning("Calibration Warning: Sensor 1 range too narrow. Auto-adjusting margin.");
+            onValue1 = offValue1 + 300f;
+        }
+
+        if ((onValue2 - offValue2) < minDiff)
+        {
+            Debug.LogWarning("Calibration Warning: Sensor 2 range too narrow. Auto-adjusting margin.");
+            onValue2 = offValue2 + 300f;
+        }
+
+        Debug.Log($"Calibration Result -- S1: {offValue1:F0}-{onValue1:F0} / S2: {offValue2:F0}-{onValue2:F0}");
+
+        // 結果をコントローラーへ反映
         if (playerController != null)
         {
             playerController.SetCalibrationValues(offValue1, onValue1, offValue2, onValue2);
         }
         else
         {
-            Debug.LogError("SessionCalibration: PlayerControllerの参照が設定されていません。");
+            Debug.LogError("SessionCalibration: PlayerController ref is missing.");
         }
 
         yield return new WaitForSeconds(1.0f);
 
+        // 終了処理
         if (overlayPanel != null) overlayPanel.SetActive(false);
 
         if (stageManager != null)
@@ -240,33 +235,27 @@ public class SessionCalibration : MonoBehaviour
         }
         else
         {
-            Debug.LogError("SessionCalibration: StageManagerの参照が設定されていません。");
+            Debug.LogError("SessionCalibration: StageManager ref is missing.");
         }
     }
 
     /// <summary>
-    /// 指定されたキーに対応する翻訳テキストを表示する。
-    /// 数値などの引数(args)がある場合は、{0}, {1} の部分に埋め込む。
+    /// ローカライズキーを指定してUIテキストを更新する。
+    /// 引数(args)がある場合はフォーマット文字列に埋め込む。
     /// </summary>
     private void SetInstruction(string key, params object[] args)
     {
         if (instructionText != null && LocalizationManager.Instance != null)
         {
-            // 1. マネージャーからフォーマット用の文字列をもらう
             string format = LocalizationManager.Instance.GetText(key);
-
-            // 2. 引数がある場合は埋め込む、なければそのまま使う
             if (args != null && args.Length > 0)
             {
-                // string.Formatを使って {0} の部分に数値をねじ込む
                 instructionText.text = string.Format(format, args);
             }
             else
             {
                 instructionText.text = format;
             }
-
-            // 3. ついでにフォントも正しい言語のものに更新する
             instructionText.font = LocalizationManager.Instance.GetCurrentFont();
         }
     }
