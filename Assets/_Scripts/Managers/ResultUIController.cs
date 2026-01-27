@@ -6,6 +6,7 @@ using System.Collections.Generic;
 
 /// <summary>
 /// リザルト画面の表示演出および、その後のリトライ確認入力を管理するクラス。
+/// 言語設定に応じて表示内容（タイトル、確認パネル）を切り替える機能を実装。
 /// </summary>
 public class ResultUIController : MonoBehaviour
 {
@@ -19,42 +20,61 @@ public class ResultUIController : MonoBehaviour
     [Tooltip("撃破数を表示するテキスト")]
     public TextMeshProUGUI killCountText;
 
+    // --- 言語別タイトル ---
+    [Header("■ ユーウツ画像")]
+    [Tooltip("日本語")]
+    public GameObject titleJP;
+    [Tooltip("英語Melancholy")]
+    public GameObject titleEN;
+
     [Header("■ 星アイコン設定")]
     public List<Image> starImages;
     public Color earnedColor = new Color(1f, 0.8f, 0f, 1f);
     public Color unearnedColor = new Color(0.3f, 0.3f, 0.3f, 0.5f);
 
     [Header("■ アニメーション設定")]
+    [Tooltip("表示開始時の待機時間")]
     public float startDelay = 0.5f;
+    [Tooltip("星が1つ表示される間隔")]
     public float starInterval = 0.4f;
+    [Tooltip("演出終了後、確認パネルが表示されるまでの待機時間")]
+    public float delayBeforeConfirmPanel = 1.0f;
+
+    [Tooltip("星が表示される時の効果音")]
     public AudioClip starSound;
     [Tooltip("選択時のSE")]
     public AudioClip selectSound;
     [Tooltip("決定時のSE")]
     public AudioClip decideSound;
 
-    // --- 追加: リトライ確認用UI ---
-    [Header("■ リトライ確認UI")]
-    [Tooltip("「もう一度プレイしますか？」等のパネル")]
-    public GameObject confirmPanel;
+    // --- リトライ確認用UI (言語別) ---
+    [Header("■ リトライ確認UI (日本語)")]
+    [Tooltip("「もう一度プレイしますか？」パネル (JP)")]
+    public GameObject confirmPanelJP;
+    [Tooltip("「はい」ハイライト (JP)")]
+    public Image haiHighlight;
+    [Tooltip("「いいえ」ハイライト (JP)")]
+    public Image iieHighlight;
 
-    [Tooltip("「はい」選択時のハイライト画像")]
-    public Image yesHighlightImage;
-    [Tooltip("「いいえ」選択時のハイライト画像")]
-    public Image noHighlightImage;
+    [Header("■ リトライ確認UI (英語)")]
+    [Tooltip("「Play Again?」パネル (EN)")]
+    public GameObject confirmPanelEN;
+    [Tooltip("「YES」ハイライト (EN)")]
+    public Image yesHighlight;
+    [Tooltip("「NO」ハイライト (EN)")]
+    public Image noHighlight;
 
-    // --- 追加: 入力設定 (TitleFlowManagerから移植) ---
+    // --- 入力設定 ---
     [Header("■ 入力設定")]
     [Tooltip("M5StickCからの静電容量値がこの値を超えると『握った』と判定する")]
     [SerializeField] private int gripThreshold = 300;
     [Tooltip("傾き判定の閾値（度）")]
     [SerializeField] private float tiltThreshold = 15.0f;
-    [Tooltip("入力開始までのディレイ（演出終了後、誤操作防止のため）")]
-    [SerializeField] private float inputStartDelay = 1.0f;
 
     private AudioSource audioSource;
-    private bool isYesSelected = true; // デフォルトはYes
+    private bool isYesSelected = true; // デフォルトはYes(左)
     private bool isInputActive = false; // 入力受付中かどうか
+    private bool isEnglishMode = false; // 現在の言語モード
 
     private void Awake()
     {
@@ -63,20 +83,34 @@ public class ResultUIController : MonoBehaviour
 
         // 初期化：パネル類は非表示
         if (resultPanel != null) resultPanel.SetActive(false);
-        if (confirmPanel != null) confirmPanel.SetActive(false);
+        if (confirmPanelJP != null) confirmPanelJP.SetActive(false);
+        if (confirmPanelEN != null) confirmPanelEN.SetActive(false);
     }
 
     /// <summary>
     /// リザルト演出を開始する。
-    /// StageManagerから呼ばれる。
+    /// 言語設定を確認し、適切なタイトルを表示する。
     /// </summary>
     public void ShowResult(int killCount, int starCount)
     {
         if (resultPanel == null) return;
 
         resultPanel.SetActive(true);
+
         // 確認パネルはまだ出さない
-        if (confirmPanel != null) confirmPanel.SetActive(false);
+        if (confirmPanelJP != null) confirmPanelJP.SetActive(false);
+        if (confirmPanelEN != null) confirmPanelEN.SetActive(false);
+
+        // --- 言語判定とタイトルの切り替え ---
+        isEnglishMode = false;
+        if (LocalizationManager.Instance != null)
+        {
+            isEnglishMode = (LocalizationManager.Instance.CurrentLanguage == Language.English);
+        }
+
+        // タイトルの出し分け
+        if (titleJP != null) titleJP.SetActive(!isEnglishMode);
+        if (titleEN != null) titleEN.SetActive(isEnglishMode);
 
         // 初期化: 星をすべて「未獲得色」にする
         foreach (var star in starImages)
@@ -118,8 +152,8 @@ public class ResultUIController : MonoBehaviour
             }
         }
 
-        // 3. 演出終了後、少し待ってから入力受付モードへ移行
-        yield return new WaitForSeconds(inputStartDelay);
+        // 3. 演出終了後、指定時間待ってからパネルを表示
+        yield return new WaitForSeconds(delayBeforeConfirmPanel);
         StartInputPhase();
     }
 
@@ -129,9 +163,17 @@ public class ResultUIController : MonoBehaviour
 
     private void StartInputPhase()
     {
-        if (confirmPanel != null) confirmPanel.SetActive(true);
+        // 言語に応じた確認パネルを表示
+        if (isEnglishMode)
+        {
+            if (confirmPanelEN != null) confirmPanelEN.SetActive(true);
+        }
+        else
+        {
+            if (confirmPanelJP != null) confirmPanelJP.SetActive(true);
+        }
 
-        isYesSelected = true; // デフォルトYes
+        isYesSelected = true; // デフォルトYes (Left)
         UpdateSelectionVisuals();
 
         isInputActive = true;
@@ -140,7 +182,7 @@ public class ResultUIController : MonoBehaviour
 
     private IEnumerator InputLoopCoroutine()
     {
-        // 誤爆防止のため、プレイヤーが手を離すまで待機する（握りっぱなし防止）
+        // 誤爆防止のため、プレイヤーが手を離すまで待機する
         while (CheckGripInput())
         {
             yield return null;
@@ -148,21 +190,19 @@ public class ResultUIController : MonoBehaviour
 
         while (isInputActive)
         {
-            // 1. 選択の切り替え (傾き or キーボード)
+            // 1. 選択の切り替え
             HandleSelectionInput();
 
-            // 2. 決定 (握る or Space)
+            // 2. 決定
             if (CheckGripInput())
             {
-                // 決定処理
                 if (decideSound != null) audioSource.PlayOneShot(decideSound);
-
-                isInputActive = false; // 入力ロック
+                isInputActive = false;
                 ExecuteChoice();
                 yield break;
             }
 
-            yield return null; // 次のフレームへ
+            yield return null;
         }
     }
 
@@ -170,14 +210,14 @@ public class ResultUIController : MonoBehaviour
     {
         float input = GetHorizontalInput();
 
-        // 右入力 (D / 傾き右) -> 右側の選択肢（No）へ移動
+        // 右入力 -> 右側の選択肢（No/いいえ）へ
         if (input > 0.5f && isYesSelected)
         {
             isYesSelected = false;
             if (selectSound != null) audioSource.PlayOneShot(selectSound);
             UpdateSelectionVisuals();
         }
-        // 左入力 (A / 傾き左) -> 左側の選択肢（Yes）へ移動
+        // 左入力 -> 左側の選択肢（Yes/はい）へ
         else if (input < -0.5f && !isYesSelected)
         {
             isYesSelected = true;
@@ -188,41 +228,45 @@ public class ResultUIController : MonoBehaviour
 
     private void ExecuteChoice()
     {
-        if (stageManager == null)
-        {
-            Debug.LogError("ResultUIController: StageManagerの参照がありません！");
-            return;
-        }
+        if (stageManager == null) return;
 
         if (isYesSelected)
         {
-            Debug.Log("リトライを選択");
             stageManager.RetryStage();
         }
         else
         {
-            Debug.Log("タイトルへ戻るを選択");
             stageManager.ReturnToTitle();
         }
     }
 
+    /// <summary>
+    /// 現在の言語モードと言語選択状態に合わせてハイライトを更新する。
+    /// </summary>
     private void UpdateSelectionVisuals()
     {
-        // Yesが選択されているならYes画像をオン、No画像をオフ
-        if (yesHighlightImage != null) yesHighlightImage.gameObject.SetActive(isYesSelected);
-        if (noHighlightImage != null) noHighlightImage.gameObject.SetActive(!isYesSelected);
+        if (isEnglishMode)
+        {
+            // 英語版ハイライト更新
+            if (yesHighlight != null) yesHighlight.gameObject.SetActive(isYesSelected);
+            if (noHighlight != null) noHighlight.gameObject.SetActive(!isYesSelected);
+        }
+        else
+        {
+            // 日本語版ハイライト更新
+            if (haiHighlight != null) haiHighlight.gameObject.SetActive(isYesSelected);
+            if (iieHighlight != null) iieHighlight.gameObject.SetActive(!isYesSelected);
+        }
     }
 
     // =========================================================
-    // センサー・入力ヘルパー (TitleFlowManager互換)
+    // センサー・入力ヘルパー
     // =========================================================
 
     private bool CheckGripInput()
     {
-        // デバッグ用キーボード入力
         if (Input.GetKey(KeyCode.Space) || Input.GetKey(KeyCode.Return)) return true;
 
-        // Arduino入力
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
         {
             return (ArduinoInputManager.GripValue1 > gripThreshold &&
@@ -233,21 +277,16 @@ public class ResultUIController : MonoBehaviour
 
     private float GetHorizontalInput()
     {
-        // デバッグ用キーボード入力
         float key = Input.GetAxisRaw("Horizontal");
         if (Mathf.Abs(key) > 0.1f) return key;
 
-        // Arduino 加速度入力
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
         {
             Vector3 accel = ArduinoInputManager.RawAccel;
-            // Z軸回りの回転などを考慮しつつ、簡易的にX/Yで傾きを取る
-            // TitleFlowManagerと同様のロジック
             float angle = -Mathf.Atan2(accel.x, accel.y) * Mathf.Rad2Deg;
 
-            // 閾値を超えたら 1.0 または -1.0 を返す
-            if (angle > tiltThreshold) return 1.0f;       // 右傾き
-            else if (angle < -tiltThreshold) return -1.0f; // 左傾き
+            if (angle > tiltThreshold) return 1.0f;
+            else if (angle < -tiltThreshold) return -1.0f;
         }
         return 0f;
     }

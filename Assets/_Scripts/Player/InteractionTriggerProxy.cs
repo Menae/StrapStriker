@@ -28,7 +28,6 @@ public class InteractionTriggerProxy : MonoBehaviour
     /// <param name="other">侵入したCollider2D</param>
     void OnTriggerEnter2D(Collider2D other)
     {
-        Debug.Log("トリガーが " + other.name + " と接触しました！");
         if (playerController != null)
         {
             playerController.HandleNpcCollision(other);

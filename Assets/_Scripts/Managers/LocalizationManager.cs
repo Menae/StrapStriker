@@ -53,8 +53,8 @@ public class LocalizationManager : MonoBehaviour
             { "msg_clear",  new Dictionary<Language, string> { { Language.Japanese, "クリア！" },   { Language.English, "CLEARED!" } } },
             { "ui_language", new Dictionary<Language, string> { { Language.Japanese, "言語: 日本語" }, { Language.English, "Lang: English" } } },
             { "calib_grip_instruction", new Dictionary<Language, string> {
-                { Language.Japanese, "つり革を\n両手でギュッと握ってください" },
-                { Language.English, "Please grip the strap\nfirmly with both hands." }
+                { Language.Japanese, "つり革を\nギュッと握ってください" },
+                { Language.English, "Please grip the strap\nfirmly with your hand." }
             } },
 
             { "calib_measuring_grip", new Dictionary<Language, string> {
@@ -99,6 +99,11 @@ public class LocalizationManager : MonoBehaviour
             { "calib_prepare_format", new Dictionary<Language, string> {
                 { Language.Japanese, "{0}\n<size=80%>計測開始まで {1:F0} 秒</size>" },
                 { Language.English, "{0}\n<size=80%>Starts in {1:F0} sec</size>" }
+            } },
+
+            { "calib_intro_instruction", new Dictionary<Language, string> {
+                { Language.Japanese, "画面の指示に従って\nつり革を操作してください" },
+                { Language.English, "Please follow the instructions\nto operate the strap." }
             } },
         };
     }

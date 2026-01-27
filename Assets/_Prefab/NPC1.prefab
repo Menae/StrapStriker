@@ -227,7 +227,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   npcType: 0
   personalSpaceRadius: 6
-  separationForce: 1.5
+  separationForce: 5
   fallenThreshold: 2
   weight: 1
   timeBeforeFade: 2

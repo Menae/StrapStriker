@@ -73,11 +73,16 @@ public class SessionCalibration : MonoBehaviour
         int count;
 
         // ---------------------------------------------------------
-        // Step 0: 開始シーケンス
+        // Step 0: 開始シーケンス (導入)
         // ---------------------------------------------------------
 
+        // 1. 開始アナウンス
         SetInstruction("calib_start_msg");
         yield return new WaitForSeconds(1.5f);
+
+        // 2. 操作説明の導入（心の準備）
+        SetInstruction("calib_intro_instruction");
+        yield return new WaitForSeconds(3.0f);
 
 
         // ---------------------------------------------------------

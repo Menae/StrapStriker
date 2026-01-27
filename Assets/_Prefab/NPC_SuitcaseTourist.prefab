@@ -360,6 +360,6 @@ MonoBehaviour:
   timeBeforeFade: 2
   fadeDuration: 1
   suitcaseVisual: {fileID: 1414931654532722212}
-  slideSpeed: 50
+  slideSpeed: 100
   groundFriction: 2
-  damage: 50
+  damage: 100

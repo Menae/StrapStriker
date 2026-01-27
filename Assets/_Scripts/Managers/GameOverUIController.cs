@@ -4,17 +4,31 @@ using System.Collections;
 
 /// <summary>
 /// ゲームオーバー画面の演出と入力制御を管理するクラス。
-/// Time.timeScale = 0 の環境下でも確実に入力を受け付けるよう設計。
+/// 言語設定に応じて表示するボタン群（JP/EN）を切り替える機能を実装。
 /// </summary>
 public class GameOverUIController : MonoBehaviour
 {
     [Header("■ 外部参照")]
     public StageManager stageManager;
 
-    [Header("■ UI参照")]
+    [Header("■ UI参照 (共通)")]
     public GameObject gameOverPanel;
-    public Image retryHighlightImage;
-    public Image titleHighlightImage;
+
+    [Header("■ UI参照 (日本語)")]
+    [Tooltip("日本語ボタン群の親オブジェクト")]
+    public GameObject jpButtonHolder;
+    [Tooltip("日本語：リトライ選択時のハイライト")]
+    public Image jpRetryHighlight;
+    [Tooltip("日本語：タイトル選択時のハイライト")]
+    public Image jpTitleHighlight;
+
+    [Header("■ UI参照 (英語)")]
+    [Tooltip("英語ボタン群の親オブジェクト")]
+    public GameObject enButtonHolder;
+    [Tooltip("英語：Retry選択時のハイライト")]
+    public Image enRetryHighlight;
+    [Tooltip("英語：Title選択時のハイライト")]
+    public Image enTitleHighlight;
 
     [Header("■ 入力設定")]
     [Tooltip("入力開始までのディレイ（秒）")]
@@ -29,6 +43,7 @@ public class GameOverUIController : MonoBehaviour
     private AudioSource audioSource;
     private bool isRetrySelected = true; // デフォルトはリトライ(左)
     private bool isInputActive = false;  // 入力受付中フラグ
+    private bool isEnglishMode = false;  // 現在の言語モード
 
     private void Awake()
     {
@@ -40,10 +55,22 @@ public class GameOverUIController : MonoBehaviour
 
     /// <summary>
     /// ゲームオーバー演出を開始する。
+    /// 現在の言語設定を取得し、適切なUIを表示する。
     /// </summary>
     public void ShowGameOver()
     {
         if (gameOverPanel != null) gameOverPanel.SetActive(true);
+
+        // 言語判定
+        isEnglishMode = false;
+        if (LocalizationManager.Instance != null)
+        {
+            isEnglishMode = (LocalizationManager.Instance.CurrentLanguage == Language.English);
+        }
+
+        // 言語ごとのホルダー表示切り替え
+        if (jpButtonHolder != null) jpButtonHolder.SetActive(!isEnglishMode);
+        if (enButtonHolder != null) enButtonHolder.SetActive(isEnglishMode);
 
         isRetrySelected = true;
         isInputActive = false;
@@ -62,7 +89,6 @@ public class GameOverUIController : MonoBehaviour
         yield return new WaitForSecondsRealtime(inputStartDelay);
 
         // 決定入力（握り/Space）が離されるまで待機
-        // センサーのノイズ等で進行不能になるのを防ぐため、傾きの判定は含めない
         while (CheckGripInput())
         {
             yield return null;
@@ -71,9 +97,6 @@ public class GameOverUIController : MonoBehaviour
         isInputActive = true;
     }
 
-    /// <summary>
-    /// Time.timeScaleが0でもUpdateは動作するため、ここで入力を監視する。
-    /// </summary>
     private void Update()
     {
         if (!isInputActive) return;
@@ -124,17 +147,29 @@ public class GameOverUIController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 現在の言語モードと言語選択状態に合わせてハイライトを更新する。
+    /// </summary>
     private void UpdateSelectionVisuals()
     {
-        if (retryHighlightImage != null) retryHighlightImage.gameObject.SetActive(isRetrySelected);
-        if (titleHighlightImage != null) titleHighlightImage.gameObject.SetActive(!isRetrySelected);
+        if (isEnglishMode)
+        {
+            // 英語版UIの更新
+            if (enRetryHighlight != null) enRetryHighlight.gameObject.SetActive(isRetrySelected);
+            if (enTitleHighlight != null) enTitleHighlight.gameObject.SetActive(!isRetrySelected);
+        }
+        else
+        {
+            // 日本語版UIの更新
+            if (jpRetryHighlight != null) jpRetryHighlight.gameObject.SetActive(isRetrySelected);
+            if (jpTitleHighlight != null) jpTitleHighlight.gameObject.SetActive(!isRetrySelected);
+        }
     }
 
     // --- センサー・入力判定 ---
 
     private bool CheckGripInput()
     {
-        // Space / Enter キーでの決定
         if (Input.GetKey(KeyCode.Space) || Input.GetKey(KeyCode.Return)) return true;
 
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
@@ -145,17 +180,13 @@ public class GameOverUIController : MonoBehaviour
         return false;
     }
 
-    /// <summary>
-    /// キーボードとArduinoの入力を取得する。
-    /// TimeScale=0でも確実に反応するよう、物理キーを直接監視する。
-    /// </summary>
     private float GetHorizontalInput()
     {
-        // 1. 物理キー入力を最優先でチェック
+        // 物理キー入力を最優先
         if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) return 1.0f;
         if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) return -1.0f;
 
-        // 2. Arduino 加速度入力
+        // Arduino 加速度入力
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
         {
             Vector3 accel = ArduinoInputManager.RawAccel;

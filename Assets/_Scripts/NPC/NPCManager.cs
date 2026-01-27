@@ -37,9 +37,7 @@ public class NPCManager : MonoBehaviour
     [Range(0f, 1f)]
     public float burstPercentage = 0.8f;
 
-    [Header("混雑率設定")]
-    [Tooltip("NPCが1人減るごとに減少する混雑率（StageManagerと同期用）")]
-    public float rateDecreasePerNpc = 1.5f;
+    // 混雑率設定(rateDecreasePerNpc)はStageManager側で一元管理するため削除
 
     private List<NPCController> spawnedNpcs = new List<NPCController>();
     private Transform playerTransform;
@@ -107,7 +105,7 @@ public class NPCManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 種類と場所を指定してNPCをスポーンさせる新メソッド。
+    /// 種類と場所を指定してNPCをスポーンさせるメソッド。
     /// StationEventのSpawnWaveから呼び出される。
     /// </summary>
     public int SpawnSpecificNPCs(StageManager manager, NPCType type, int count, bool atDoor)
@@ -176,21 +174,22 @@ public class NPCManager : MonoBehaviour
             float fixedY = spawnAreaCenter.y;
             Vector2 randomPosition = new Vector2(Random.Range(minX, maxX), fixedY);
 
-            // 【修正】NormalA をデフォルトとして使用
             SpawnSingleNPC(manager, randomPosition, NPCType.NormalA);
         }
         return count;
     }
 
     /// <summary>
-    /// 混雑率から必要なNPC数を逆算してスポーンする。
-    /// NormalA と NormalB をランダムに出現させるように変更し、コンパイルエラーを解消。
+    /// 指定された混雑率を満たすのに必要なNPC数を逆算してスポーンする。
+    /// 生成数に基づく正確なレートを返し、マネージャー側の数値を補正することで誤差を防ぐ。
     /// </summary>
-    public void SpawnNPCsForCongestion(StageManager manager, float congestionRate)
+    /// <returns>実際に生成された数に基づいた「補正後の混雑率」</returns>
+    public float SpawnNPCsForCongestion(StageManager manager, float congestionRate)
     {
-        if (manager.rateDecreasePerNpc <= 0) return;
+        if (manager.rateDecreasePerNpc <= 0) return congestionRate;
 
         int count = Mathf.FloorToInt(congestionRate / manager.rateDecreasePerNpc);
+        int actualSpawnedCount = 0;
 
         bool useDoor = (doorSpawnPoints != null && doorSpawnPoints.Count > 0);
 
@@ -213,20 +212,30 @@ public class NPCManager : MonoBehaviour
                 Vector2 randomPosition = new Vector2(Random.Range(minX, maxX), spawnAreaCenter.y);
                 SpawnSingleNPC(manager, randomPosition, selectedType);
             }
+            actualSpawnedCount++;
         }
+
+        // 計算上の端数を切り捨てた、実体と整合性の取れた混雑率を返す
+        return actualSpawnedCount * manager.rateDecreasePerNpc;
     }
 
+    /// <summary>
+    /// 定期的にNPCの状態（距離によるアクティブ切り替え）を更新する。
+    /// 不要になった（プールに戻った）NPCの参照はリストから削除する。
+    /// </summary>
     void UpdateNpcStates()
     {
         if (playerTransform == null) return;
 
+        // リスト削除を伴うため、逆順ループで処理
         for (int i = spawnedNpcs.Count - 1; i >= 0; i--)
         {
             var npc = spawnedNpcs[i];
-            // 既にプールに戻されている(非アクティブ)場合はリストから除外等はしないが、チェックはスキップ
+
+            // NPCが削除済み、または非アクティブ（プール返却済み）の場合は管理対象から外す
             if (npc == null || !npc.gameObject.activeSelf)
             {
-                // 必要ならリストから削除する処理を入れても良い
+                spawnedNpcs.RemoveAt(i);
                 continue;
             }
 

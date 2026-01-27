@@ -199,14 +199,8 @@ public class PlayerController : MonoBehaviour
     private bool hasBattery = false;
     private bool wasGroundedLastFrame = true;
 
-    // アニメーションのスムージング用変数
-    private float currentSwayTime = 0.5f;
-
     // 発射直後の接地判定を無効化するためのタイマー
     private float launchGraceTimer = 0f;
-
-    // 角度の「180度またぎ」を防止するための累積角度保持用
-    private float continuousAngle = 0f;
 
     /// <summary>
     /// 初期化処理。コンポーネントの参照を取得する。
@@ -577,7 +571,7 @@ public class PlayerController : MonoBehaviour
                         if (currentSwingStage < maxSwingStages)
                         {
                             currentSwingStage++;
-                            // Debug.Log($"<color=cyan>Swing Stage UP!</color> Lv.{currentSwingStage}");
+                            Debug.Log($"<color=cyan>Swing Stage UP!</color> Lv.{currentSwingStage}");
                         }
                         timeSinceLastValidSwing = 0f;
                     }
@@ -593,7 +587,7 @@ public class PlayerController : MonoBehaviour
                 {
                     currentSwingStage--;
                     timeSinceLastValidSwing = 0f;
-                    // Debug.Log($"<color=orange>Swing Stage Decay...</color> Lv.{currentSwingStage}");
+                    Debug.Log($"<color=orange>Swing Stage Decay...</color> Lv.{currentSwingStage}");
                 }
             }
 
@@ -694,8 +688,6 @@ public class PlayerController : MonoBehaviour
         HangingStrap nearestStrap = HangingStrapManager.FindNearestStrap(transform.position, maxGrabDistance);
         if (nearestStrap != null)
         {
-            Debug.Log("<color=green>成功: " + nearestStrap.name + " を掴みます！</color>");
-
             bool isPlayerGrounded = IsGrounded();
             if (!isPlayerGrounded)
             {
@@ -714,11 +706,21 @@ public class PlayerController : MonoBehaviour
             // --- 開始ステージ（勢いボーナス）の適用 ---
             if (stageManager != null)
             {
-                // StageManagerからボーナスステージを計算してもらう
-                int bonusStage = stageManager.GetCalculatedStartStage();
+                int startStage;
 
-                // 最大値を超えないようにクランプして適用
-                currentSwingStage = Mathf.Clamp(bonusStage, 0, maxSwingStages);
+                // オーバーロード状態（限界突破中）は強力な初期推進力を付与する
+                if (stageManager.IsOverloaded)
+                {
+                    startStage = 4;
+                }
+                else
+                {
+                    // 通常時は混雑率や撃破数に基づくボーナス計算を行う
+                    startStage = stageManager.GetCalculatedStartStage();
+                }
+
+                // 最大ステージ数を超えない範囲で適用
+                currentSwingStage = Mathf.Clamp(startStage, 0, maxSwingStages);
 
                 // 視覚的フィードバック（SwayPower）にも即座に反映
                 float stageRatio = (float)currentSwingStage / (float)maxSwingStages;
@@ -908,7 +910,7 @@ public class PlayerController : MonoBehaviour
                 {
                     Vector2 powerBonus = currentVelocity.normalized * swayPower * swayImpactPowerBonus;
                     currentVelocity += powerBonus;
-                    Debug.Log($"<color=red>Swing Impact!</color> PowerBonus: {powerBonus.magnitude:F1}");
+                    //Debug.Log($"<color=red>Swing Impact!</color> PowerBonus: {powerBonus.magnitude:F1}");
                 }
 
                 // 1. 速度(m/s) × 倍率(Mass想定) = 衝撃力(Impulse) をここで確定
@@ -920,9 +922,6 @@ public class PlayerController : MonoBehaviour
             }
         }
     }
-
-    // デバッグ用：再帰呼び出しの深さを測るカウンター（静的変数）
-    private static int debugRecursionDepth = 0;
 
     private bool isExploding = false;
 
