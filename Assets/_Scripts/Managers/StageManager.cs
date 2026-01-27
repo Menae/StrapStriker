@@ -80,7 +80,7 @@ public class StageManager : MonoBehaviour
 
     public float CurrentCongestionRate => currentCongestionRate;
 
-    [Header("▼ オーバーロード設定")]
+    [Header("■ オーバーロード設定")]
     [Tooltip("混雑率が最大に達してからゲームオーバーになるまでの猶予時間（秒）")]
     public float overloadDuration = 10.0f;
 
@@ -106,6 +106,10 @@ public class StageManager : MonoBehaviour
 
     [Header("■ パネル (言語共通)")]
     public GameObject tutorialPanel;
+    [Tooltip("チュートリアルパネル内の日本語用画像オブジェクト")]
+    public GameObject tutorialImageJP;
+    [Tooltip("チュートリアルパネル内の英語用画像オブジェクト")]
+    public GameObject tutorialImageEN;
     public GameObject pauseMenuPanel;
     public GameObject gameOverPanel;
     public GameObject clearPanel;
@@ -206,11 +210,17 @@ public class StageManager : MonoBehaviour
         }
 #endif
 
+        // 常時表示UIの切り替え
         if (uiContainerJP != null) uiContainerJP.SetActive(!isEnglishMode);
         if (uiContainerEN != null) uiContainerEN.SetActive(isEnglishMode);
 
+        // 駅名テキストの切り替え
         if (stationNameTextJP != null) stationNameTextJP.gameObject.SetActive(!isEnglishMode);
         if (stationNameTextEN != null) stationNameTextEN.gameObject.SetActive(isEnglishMode);
+
+        // チュートリアル画像の切り替え
+        if (tutorialImageJP != null) tutorialImageJP.SetActive(!isEnglishMode);
+        if (tutorialImageEN != null) tutorialImageEN.SetActive(isEnglishMode);
     }
 
     private void HideAllPanels()
