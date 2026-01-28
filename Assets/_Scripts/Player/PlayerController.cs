@@ -510,7 +510,7 @@ public class PlayerController : MonoBehaviour
         //    DeltaAngleを使うことで、359度と1度の境目なども正しく計算できる
         // =================================================================
 
-        float angleDifference = Mathf.DeltaAngle(270f, currentDeviceAngle);
+        float angleDifference = Mathf.DeltaAngle(0f, currentDeviceAngle);
 
         if (invertDirectControl)
         {

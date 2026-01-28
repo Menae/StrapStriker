@@ -2757,7 +2757,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7b168a1610524a44f8293d27222cdc68, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  fallbackPortName: COM6
+  fallbackPortName: COM4
   baudRate: 115200
   smoothingFactor: 0.5
 --- !u!4 &2085190142

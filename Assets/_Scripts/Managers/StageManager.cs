@@ -60,7 +60,7 @@ public struct DefeatedBonusSettings
 [RequireComponent(typeof(AudioSource))]
 public class StageManager : MonoBehaviour
 {
-    public enum GameState { Tutorial, Playing, Paused, GameOver, StageClear }
+    public enum GameState { Initializing, Tutorial, Playing, Paused, GameOver, StageClear }
     public GameState CurrentState { get; private set; }
     public static Vector2 CurrentInertia { get; private set; }
 
@@ -113,6 +113,12 @@ public class StageManager : MonoBehaviour
     public GameObject pauseMenuPanel;
     public GameObject gameOverPanel;
     public GameObject clearPanel;
+
+    [Header("■ チュートリアルUI制御")]
+    [Tooltip("チュートリアル表示直後の入力無効化時間（秒）")]
+    public float tutorialInputBlockDuration = 1.0f;
+    [Tooltip("入力無効化中に進行するゲージ画像 (Image Type: Filled)")]
+    public Image tutorialBlockFillImage;
 
     [Header("■ 駅名表示 (言語別TMP)")]
     public TextMeshProUGUI stationNameTextJP;
@@ -167,7 +173,7 @@ public class StageManager : MonoBehaviour
     private int currentStationIndex;
     private Coroutine blinkingEffectCoroutine;
     private bool isEnglishMode = false;
-
+    private float currentTutorialBlockTimer = 0f;
     private enum StatusDisplayType { None, Decelerating, Stopped, Accelerating }
 
     void Awake()
@@ -185,6 +191,7 @@ public class StageManager : MonoBehaviour
         SetStatusDisplay(StatusDisplayType.Stopped);
         UpdateStationNameUI("");
 
+        CurrentState = GameState.Initializing;
         CurrentInertia = Vector2.zero;
         Time.timeScale = 1f;
 
@@ -235,16 +242,59 @@ public class StageManager : MonoBehaviour
     {
         CurrentState = GameState.Tutorial;
         if (tutorialPanel != null) tutorialPanel.SetActive(true);
+
+        // 入力ブロックタイマーの初期化
+        currentTutorialBlockTimer = 0f;
+        if (tutorialBlockFillImage != null)
+        {
+            tutorialBlockFillImage.gameObject.SetActive(true);
+            tutorialBlockFillImage.fillAmount = 0f;
+        }
+
         Time.timeScale = 0f;
     }
 
     void Update()
     {
+        if (CurrentState == GameState.Tutorial)
+        {
+            // チュートリアル表示直後の入力ブロック処理
+            if (currentTutorialBlockTimer < tutorialInputBlockDuration)
+            {
+                currentTutorialBlockTimer += Time.unscaledDeltaTime;
+
+                if (tutorialBlockFillImage != null)
+                {
+                    float progress = Mathf.Clamp01(currentTutorialBlockTimer / tutorialInputBlockDuration);
+                    tutorialBlockFillImage.fillAmount = progress;
+
+                    // 念のため表示を保証
+                    if (!tutorialBlockFillImage.gameObject.activeSelf)
+                    {
+                        tutorialBlockFillImage.gameObject.SetActive(true);
+                    }
+                }
+                return; // ブロック期間中はリターン
+            }
+            else
+            {
+                // ブロック終了時は確実に非表示にする
+                if (tutorialBlockFillImage != null)
+                {
+                    tutorialBlockFillImage.gameObject.SetActive(false);
+                }
+            }
+
+            // ブロック解除後のゲーム開始入力判定
+            if (Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0))
+            {
+                StartGame();
+            }
+        }
+
         if (CurrentState == GameState.Playing)
         {
-            // オーバーロード（猶予時間）の監視
             ManageOverloadState();
-
             UpdateCongestionGauge();
 
             if (Input.GetKeyDown(KeyCode.F12))
