@@ -479,6 +479,7 @@ public class PlayerController : MonoBehaviour
             float accX = GetAxisValue(accelHorizontalAxis, ArduinoInputManager.RawAccel);
             float accY = GetAxisValue(accelVerticalAxis, ArduinoInputManager.RawAccel);
 
+
             // 基準(270)との差分（これが大きいと張り付く）
             float rawDiff = Mathf.DeltaAngle(270f, currentDeviceAngle);
 
@@ -555,7 +556,7 @@ public class PlayerController : MonoBehaviour
             float clampedDifference = Mathf.Clamp(angleDifference, -swayMaxAngle, swayMaxAngle);
 
             // ターゲット角度を決定 (270度基準)
-            float targetAngle = 270f + clampedDifference;
+            float targetAngle = 0f + clampedDifference;
 
             // Rigidbodyを回転させる
             float currentZ = transform.eulerAngles.z;
