@@ -28,6 +28,10 @@ public class ArduinoInputManager : MonoBehaviour
     [Range(0.01f, 1f)]
     public float smoothingFactor = 0.2f;
 
+    [Header("デバッグ設定")]
+    [Tooltip("毎フレームの握力センサー値をコンソールに出力するかどうか")]
+    public bool showDebugLogs = false;
+
     /// <summary>
     /// デバイスとの接続状態。
     /// </summary>
@@ -117,6 +121,12 @@ public class ArduinoInputManager : MonoBehaviour
         // 握力値のスムージング処理
         SmoothedGripValue1 = Mathf.Lerp(SmoothedGripValue1, (float)GripValue1, smoothingFactor);
         SmoothedGripValue2 = Mathf.Lerp(SmoothedGripValue2, (float)GripValue2, smoothingFactor);
+
+        // センサー値のモニタリング
+        if (showDebugLogs)
+        {
+            Debug.Log($"[M5 Monitor] Grip1: {GripValue1} / Grip2: {GripValue2}");
+        }
     }
 
     /// <summary>
