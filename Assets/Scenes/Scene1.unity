@@ -2868,10 +2868,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 6b2aaaba4d47ed44aae6a01902570c9f, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -3107,10 +3107,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 0ffce55ae6485ca42b85c605c972d7cb, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -3248,6 +3248,7 @@ MonoBehaviour:
   inputStartDelay: 1
   gripThreshold: 1500
   tiltThreshold: 15
+  holdDuration: 2
   selectSound: {fileID: 0}
   decideSound: {fileID: 0}
 --- !u!1 &406097567
@@ -5065,10 +5066,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 06a6c8ea3e044fb4681b919648d8951e, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -6985,6 +6986,7 @@ MonoBehaviour:
   noHighlight: {fileID: 330774973}
   gripThreshold: 1500
   tiltThreshold: 15
+  holdDuration: 2
 --- !u!1 &944620618
 GameObject:
   m_ObjectHideFlags: 0
@@ -8167,10 +8169,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 3b9e3c4a2458dd543867986c87f94a3e, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -8281,10 +8283,11 @@ MonoBehaviour:
   directControlSmoothSpeed: 2.5
   maxSwingStages: 5
   minStageToLaunch: 1
-  powerPerStage: 12
+  powerPerStage: 2
   validSwingThresholdAngle: 15
   validSwingThresholdVelocity: 30
   stageDecayTime: 1
+  baseLaunchPower: 5
   swayForceByAngle: 20
   swayForceByVelocity: 0.1
   swayIncreaseRate: 10
@@ -8852,12 +8855,9 @@ MonoBehaviour:
   rateDecreasePerNpc: 1
   overloadDuration: 10
   congestionBonusList:
-  - minRate: 200
-    maxRate: 300
-    startStage: 2
   - minRate: 300
     maxRate: 500
-    startStage: 4
+    startStage: 3
   defeatedBonusList:
   - minDefeatedCount: 250
     startStage: 4
@@ -11434,7 +11434,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 2
+  m_SortingOrder: 10
   m_Sprite: {fileID: 21300000, guid: 77a3be80b824b154baa3a1b13b74250e, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
@@ -12139,10 +12139,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: adbeb40d172e9cf47af0677b2dd729d7, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -13383,10 +13383,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 97c0aba53e3319943ac2386647652a7f, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -14967,10 +14967,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: dbd158e26d475134fb0bb5d56a8e3d65, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
@@ -16003,10 +16003,10 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 75681233652e62745b46f8e33e8a7cc8, type: 3}
-  m_Type: 0
+  m_Type: 3
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 4
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0

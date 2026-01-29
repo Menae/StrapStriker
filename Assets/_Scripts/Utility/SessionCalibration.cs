@@ -208,13 +208,13 @@ public class SessionCalibration : MonoBehaviour
         if ((onValue1 - offValue1) < minDiff)
         {
             Debug.LogWarning("Calibration Warning: Sensor 1 range too narrow. Auto-adjusting margin.");
-            onValue1 = offValue1 + 300f;
+            onValue1 = offValue1 + 1000f;
         }
 
         if ((onValue2 - offValue2) < minDiff)
         {
             Debug.LogWarning("Calibration Warning: Sensor 2 range too narrow. Auto-adjusting margin.");
-            onValue2 = offValue2 + 300f;
+            onValue2 = offValue2 + 1000f;
         }
 
         Debug.Log($"Calibration Result -- S1: {offValue1:F0}-{onValue1:F0} / S2: {offValue2:F0}-{onValue2:F0}");

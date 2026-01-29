@@ -781,7 +781,7 @@ public class PlayerController : MonoBehaviour
                 if (useDirectControl)
                 {
                     // DirectControlモード: ステージ数で判定
-                    // ※基礎パワーだけで飛びたい場合は、Inspectorで minStageToLaunch を 0 に設定してください
+                    // ※基礎パワーだけで飛びたい場合は、Inspectorで minStageToLaunch を 0 に設定
                     if (currentSwingStage < minStageToLaunch)
                     {
                         isPowerInsufficient = true;
@@ -855,7 +855,6 @@ public class PlayerController : MonoBehaviour
                     if (useDirectControl)
                     {
                         // DirectControl: ステージ数ベース
-                        // ■■ 改修箇所：基礎パワー(baseLaunchPower)を加算するように変更 ■■
                         float totalPower = baseLaunchPower + (currentSwingStage * powerPerStage);
                         launchForce = totalPower * launchMultiplier;
                     }

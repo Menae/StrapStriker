@@ -7,6 +7,7 @@ using System.Collections.Generic;
 /// <summary>
 /// リザルト画面の表示演出および、その後のリトライ確認入力を管理するクラス。
 /// 言語設定に応じて表示内容（タイトル、確認パネル）を切り替える機能を実装。
+/// 長押しによる決定操作に対応。
 /// </summary>
 public class ResultUIController : MonoBehaviour
 {
@@ -51,17 +52,17 @@ public class ResultUIController : MonoBehaviour
     [Header("■ リトライ確認UI (日本語)")]
     [Tooltip("「もう一度プレイしますか？」パネル (JP)")]
     public GameObject confirmPanelJP;
-    [Tooltip("「はい」ハイライト (JP)")]
+    [Tooltip("「はい」ハイライト (JP) - ImageType:Filled推奨")]
     public Image haiHighlight;
-    [Tooltip("「いいえ」ハイライト (JP)")]
+    [Tooltip("「いいえ」ハイライト (JP) - ImageType:Filled推奨")]
     public Image iieHighlight;
 
     [Header("■ リトライ確認UI (英語)")]
     [Tooltip("「Play Again?」パネル (EN)")]
     public GameObject confirmPanelEN;
-    [Tooltip("「YES」ハイライト (EN)")]
+    [Tooltip("「YES」ハイライト (EN) - ImageType:Filled推奨")]
     public Image yesHighlight;
-    [Tooltip("「NO」ハイライト (EN)")]
+    [Tooltip("「NO」ハイライト (EN) - ImageType:Filled推奨")]
     public Image noHighlight;
 
     // --- 入力設定 ---
@@ -71,10 +72,15 @@ public class ResultUIController : MonoBehaviour
     [Tooltip("傾き判定の閾値（度）")]
     [SerializeField] private float tiltThreshold = 15.0f;
 
+    [Header("■ 長押し決定設定")]
+    [Tooltip("決定に必要な長押し時間（秒）")]
+    [SerializeField] private float holdDuration = 2.0f;
+
     private AudioSource audioSource;
     private bool isYesSelected = true; // デフォルトはYes(左)
     private bool isInputActive = false; // 入力受付中かどうか
     private bool isEnglishMode = false; // 現在の言語モード
+    private float currentHoldTimer = 0f; // 現在の長押し時間
 
     private void Awake()
     {
@@ -188,27 +194,58 @@ public class ResultUIController : MonoBehaviour
             yield return null;
         }
 
+        ResetHoldState();
+
         while (isInputActive)
         {
             // 1. 選択の切り替え
-            HandleSelectionInput();
+            if (HandleSelectionInput())
+            {
+                // 選択を変えたら長押しカウントはリセットし、Fillを1に戻す
+                ResetHoldState();
+            }
 
-            // 2. 決定
+            // 2. 長押し決定ロジック
             if (CheckGripInput())
             {
-                if (decideSound != null) audioSource.PlayOneShot(decideSound);
-                isInputActive = false;
-                ExecuteChoice();
-                yield break;
+                currentHoldTimer += Time.unscaledDeltaTime; // タイムスケール停止中でも動くように
+
+                // 0 -> 1 にチャージするアニメーション
+                float progress = Mathf.Clamp01(currentHoldTimer / holdDuration);
+                UpdateFillAnimation(progress);
+
+                if (currentHoldTimer >= holdDuration)
+                {
+                    // 決定
+                    if (decideSound != null) audioSource.PlayOneShot(decideSound);
+                    isInputActive = false;
+                    ExecuteChoice();
+                    yield break;
+                }
+            }
+            else
+            {
+                // 離している間は「選択中」を示すためFillを1にする
+                ResetHoldState();
             }
 
             yield return null;
         }
     }
 
-    private void HandleSelectionInput()
+    /// <summary>
+    /// 長押しタイマーをリセットし、見た目を選択中状態（Fill=1）に戻す
+    /// </summary>
+    private void ResetHoldState()
+    {
+        currentHoldTimer = 0f;
+        UpdateFillAnimation(1.0f);
+    }
+
+    private bool HandleSelectionInput()
     {
         float input = GetHorizontalInput();
+        bool changed = false;
 
         // 右入力 -> 右側の選択肢（No/いいえ）へ
         if (input > 0.5f && isYesSelected)
@@ -216,6 +253,7 @@ public class ResultUIController : MonoBehaviour
             isYesSelected = false;
             if (selectSound != null) audioSource.PlayOneShot(selectSound);
             UpdateSelectionVisuals();
+            changed = true;
         }
         // 左入力 -> 左側の選択肢（Yes/はい）へ
         else if (input < -0.5f && !isYesSelected)
@@ -223,7 +261,10 @@ public class ResultUIController : MonoBehaviour
             isYesSelected = true;
             if (selectSound != null) audioSource.PlayOneShot(selectSound);
             UpdateSelectionVisuals();
+            changed = true;
         }
+
+        return changed;
     }
 
     private void ExecuteChoice()
@@ -242,20 +283,56 @@ public class ResultUIController : MonoBehaviour
 
     /// <summary>
     /// 現在の言語モードと言語選択状態に合わせてハイライトを更新する。
+    /// 切り替え直後はFillを1（満タン）にする。
     /// </summary>
     private void UpdateSelectionVisuals()
     {
         if (isEnglishMode)
         {
             // 英語版ハイライト更新
-            if (yesHighlight != null) yesHighlight.gameObject.SetActive(isYesSelected);
-            if (noHighlight != null) noHighlight.gameObject.SetActive(!isYesSelected);
+            SafeSetActive(yesHighlight, isYesSelected);
+            SafeSetActive(noHighlight, !isYesSelected);
         }
         else
         {
             // 日本語版ハイライト更新
-            if (haiHighlight != null) haiHighlight.gameObject.SetActive(isYesSelected);
-            if (iieHighlight != null) iieHighlight.gameObject.SetActive(!isYesSelected);
+            SafeSetActive(haiHighlight, isYesSelected);
+            SafeSetActive(iieHighlight, !isYesSelected);
+        }
+
+        // 選択された画像はFill=1の状態にする
+        UpdateFillAnimation(1.0f);
+    }
+
+    private void SafeSetActive(Image img, bool isActive)
+    {
+        if (img != null && img.gameObject != null)
+        {
+            img.gameObject.SetActive(isActive);
+        }
+    }
+
+    /// <summary>
+    /// 現在アクティブなハイライト画像のFillAmountを更新する
+    /// </summary>
+    private void UpdateFillAnimation(float amount)
+    {
+        Image currentImage = GetCurrentActiveHighlight();
+        if (currentImage != null)
+        {
+            currentImage.fillAmount = amount;
+        }
+    }
+
+    private Image GetCurrentActiveHighlight()
+    {
+        if (isEnglishMode)
+        {
+            return isYesSelected ? yesHighlight : noHighlight;
+        }
+        else
+        {
+            return isYesSelected ? haiHighlight : iieHighlight;
         }
     }
 

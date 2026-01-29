@@ -1393,7 +1393,7 @@ MonoBehaviour:
   jpNoImage: {fileID: 1311280928}
   enYesImage: {fileID: 1193729741}
   enNoImage: {fileID: 1419736088}
-  gripThreshold: 10
+  gripThreshold: 1500
   tiltThreshold: 10
   invertTilt: 0
   holdDuration: 2
