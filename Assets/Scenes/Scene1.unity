@@ -8281,7 +8281,6 @@ MonoBehaviour:
   gyroRotationAxis: 4
   swayMaxAngle: 70
   directControlSmoothSpeed: 5
-  swayAngleAtOne: 40
   maxSwingStages: 5
   minStageToLaunch: 1
   powerPerStage: 2
@@ -8296,6 +8295,8 @@ MonoBehaviour:
   swingVelocityThreshold: 15
   powerToSwingMultiplier: 0.1
   swayDecayRate: 5
+  swayAngleAtZero: -60
+  swayAngleAtOne: 40
   launchMultiplier: 1
   inertiaJumpBoostStrength: 10
   aerialRotationSpeed: 5
