@@ -275,7 +275,7 @@ public class StageManager : MonoBehaviour
                         tutorialBlockFillImage.gameObject.SetActive(true);
                     }
                 }
-                return; // ブロック期間中はリターン
+                return; // ブロック期間中は入力を受け付けずにリターン
             }
             else
             {
@@ -286,8 +286,21 @@ public class StageManager : MonoBehaviour
                 }
             }
 
-            // ブロック解除後のゲーム開始入力判定
-            if (Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0))
+            // --- ブロック解除後のゲーム開始入力判定 ---
+
+            // 1. キーボード・マウス入力
+            bool isKeyInput = Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0);
+
+            // 2. Arduino握力センサー入力 (閾値20以上で反応)
+            bool isGripInput = false;
+            if (ArduinoInputManager.instance != null)
+            {
+                // 両方のセンサーが反応しているかチェック
+                isGripInput = (ArduinoInputManager.GripValue1 >= 1500 && ArduinoInputManager.GripValue2 >= 1500);
+            }
+
+            // いずれかの入力があればゲーム開始
+            if (isKeyInput || isGripInput)
             {
                 StartGame();
             }
