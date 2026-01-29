@@ -2761,6 +2761,7 @@ MonoBehaviour:
   fallbackPortName: COM4
   baudRate: 115200
   smoothingFactor: 0.5
+  showDebugLogs: 0
 --- !u!4 &2085190142
 Transform:
   m_ObjectHideFlags: 0
