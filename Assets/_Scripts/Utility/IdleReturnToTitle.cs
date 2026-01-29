@@ -7,11 +7,17 @@ public class IdleReturnToTitle : MonoBehaviour
     [Tooltip("放置とみなすまでの時間（秒）")]
     public float timeLimit = 60.0f;
 
-    [Tooltip("操作中とみなす握力センサーの閾値（これより大きければタイマーリセット）")]
-    public int gripThreshold = 200;
+    [Tooltip("操作中とみなす握力センサーの閾値")]
+    public float gripThreshold = 1500f; // floatに変更し、Smoothed値と比較
 
     [Tooltip("戻る先のシーン名")]
     public string titleSceneName = "TitleScreen";
+
+    [Header("入力検知オプション")]
+    [Tooltip("マウス移動を検知対象に含めるか")]
+    public bool detectMouseMovement = false; // 誤検知しやすいのでデフォルトOFF推奨
+    [Tooltip("デバッグログを表示するか")]
+    public bool showDebugLog = true;
 
     private float currentIdleTime = 0f;
     private bool isReturning = false;
@@ -28,9 +34,12 @@ public class IdleReturnToTitle : MonoBehaviour
         }
         else
         {
-            // Time.timeScaleが0（ポーズ中やキャリブレーション中）でも計測できるよう
-            // unscaledDeltaTimeを使用する
             currentIdleTime += Time.unscaledDeltaTime;
+
+            if (showDebugLog && Time.frameCount % 60 == 0) // 1秒に1回ログ出し
+            {
+                // Debug.Log($"Idle Time: {currentIdleTime:F1} / {timeLimit:F1}");
+            }
 
             if (currentIdleTime >= timeLimit)
             {
@@ -44,25 +53,42 @@ public class IdleReturnToTitle : MonoBehaviour
     /// </summary>
     private bool IsInputActive()
     {
-        // 1. キーボード・マウス入力（デバッグ用含む）
-        // Input.anyKey はマウスボタンやキーボードのどれかが押されているとtrue
-        if (Input.anyKey) return true;
+        // 1. キーボード入力
+        if (Input.anyKey)
+        {
+            if (showDebugLog && currentIdleTime > 1f) Debug.Log("<color=yellow>Reset:</color> Keyboard Input");
+            return true;
+        }
 
-        // マウスの移動検知
-        if (Mathf.Abs(Input.GetAxis("Mouse X")) > 0.1f || Mathf.Abs(Input.GetAxis("Mouse Y")) > 0.1f) return true;
+        // 2. マウス移動（オプション）
+        if (detectMouseMovement)
+        {
+            if (Mathf.Abs(Input.GetAxis("Mouse X")) > 0.1f || Mathf.Abs(Input.GetAxis("Mouse Y")) > 0.1f)
+            {
+                if (showDebugLog && currentIdleTime > 1f) Debug.Log("<color=yellow>Reset:</color> Mouse Movement");
+                return true;
+            }
+        }
 
-        // 2. Arduino入力（つり革）
+        // 3. Arduino入力（つり革）
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
         {
-            // どちらかのつり革が閾値以上に握られているか
-            if (ArduinoInputManager.GripValue1 > gripThreshold ||
-                ArduinoInputManager.GripValue2 > gripThreshold)
+            // 生データ(GripValue)ではなく、平滑化データ(SmoothedGripValue)を使う
+            float val1 = ArduinoInputManager.instance.SmoothedGripValue1;
+            float val2 = ArduinoInputManager.instance.SmoothedGripValue2;
+
+            if (val1 > gripThreshold || val2 > gripThreshold)
             {
+                if (showDebugLog && currentIdleTime > 1f)
+                    Debug.Log($"<color=yellow>Reset:</color> Sensor Grip! (Val1:{val1:F0}, Val2:{val2:F0})");
                 return true;
             }
 
-            // M5のボタンが押されているか
-            if (ArduinoInputManager.IsM5BtnPressed) return true;
+            if (ArduinoInputManager.IsM5BtnPressed)
+            {
+                if (showDebugLog && currentIdleTime > 1f) Debug.Log("<color=yellow>Reset:</color> M5 Button");
+                return true;
+            }
         }
 
         return false;
@@ -71,13 +97,10 @@ public class IdleReturnToTitle : MonoBehaviour
     private void ReturnToTitle()
     {
         isReturning = true;
-        Debug.Log("放置タイムアウト：タイトルへ戻ります");
+        Debug.Log("<color=red>放置タイムアウト：タイトルへ戻ります</color>");
 
-        // タイムスケールを標準に戻してからシーン遷移を行う
-        // (キャリブレーション中などにtimeScaleが0のまま遷移するのを防ぐ)
         Time.timeScale = 1f;
 
-        // StageManagerで使っているフェード機能があればそれを使う
         if (SceneFader.instance != null)
         {
             SceneFader.instance.LoadSceneWithFade(titleSceneName);

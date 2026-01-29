@@ -1061,6 +1061,7 @@ PrefabInstance:
     - {fileID: 7620819372033727025, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
     - {fileID: 4113141365664174179, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
     - {fileID: 1498387278679644403, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
+    - {fileID: 6110033867579933747, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 694874044388015971, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
       insertIndex: -1
@@ -7656,6 +7657,7 @@ PrefabInstance:
     - {fileID: 7620819372033727025, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
     - {fileID: 4113141365664174179, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
     - {fileID: 1498387278679644403, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
+    - {fileID: 256346582376140925, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: f8db485097dfbb04d99dd4b86b87b692, type: 3}
@@ -8986,8 +8988,8 @@ MonoBehaviour:
   doorController: {fileID: 211228380}
   gameOverUI: {fileID: 383639126}
   speedLinesEffect: {fileID: 669046851}
-  rankThreshold2Stars: 20
-  rankThreshold3Stars: 100
+  rankThreshold2Stars: 200
+  rankThreshold3Stars: 400
   debugForceEnglish: 0
 --- !u!4 &1142329254
 Transform:
@@ -12394,6 +12396,8 @@ MonoBehaviour:
   timeLimit: 60
   gripThreshold: 1500
   titleSceneName: TitleScreen
+  detectMouseMovement: 0
+  showDebugLog: 1
 --- !u!1001 &1597328802
 PrefabInstance:
   m_ObjectHideFlags: 0
