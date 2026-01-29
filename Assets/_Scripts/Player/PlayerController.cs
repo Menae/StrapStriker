@@ -510,7 +510,7 @@ public class PlayerController : MonoBehaviour
         // =================================================================
 
         // 基準(0度)からのズレを計算
-        float angleDifference = Mathf.DeltaAngle(0f, currentDeviceAngle);
+        float angleDifference = Mathf.DeltaAngle(270f, currentDeviceAngle);
 
         // --- 感度適用の追加箇所 ---
         // 「入力設定値(inputAngleForMaxSway)」で「最大角度(swayMaxAngle)」に到達するよう倍率を計算
