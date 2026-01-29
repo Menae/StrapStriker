@@ -3,21 +3,17 @@ using UnityEngine.UI;
 using System.Collections;
 
 /// <summary>
-/// タイトル画面における一連の進行（ステートマシン）とUI表現を制御するマネージャークラス。
-/// センサー入力に応じた言語選択、および開始確認のフローを提供し、
-/// デザイナー作成の画像オブジェクトの表示・非表示を切り替えることで状態を視覚化する。
+/// タイトル画面における進行フローとUI表現を制御するマネージャークラス。
+/// 長押しによる決定操作、誤操作防止の入力ガード、言語選択および開始確認のフローを提供する。
 /// </summary>
 [RequireComponent(typeof(SceneLoaderButton))]
 public class TitleFlowManager : MonoBehaviour
 {
-    /// <summary>
-    /// タイトル画面の各進行フェーズを定義する列挙型。
-    /// </summary>
     public enum TitleState
     {
-        WaitToStart,    // 初期待機画面（「握って開始」等）
+        WaitToStart,    // 初期待機画面
         SelectLanguage, // 言語選択画面
-        ConfirmStart,   // 最終開始確認画面（Yes/No）
+        ConfirmStart,   // 最終開始確認画面
         Loading         // シーン遷移中
     }
 
@@ -29,109 +25,193 @@ public class TitleFlowManager : MonoBehaviour
     // UIコンテナ参照
     // ---------------------------------------------------------
     [Header("■ 階層パネル参照")]
-    [SerializeField, Tooltip("開始待機時の親パネル")]
-    private GameObject startPromptPanel;
-
-    [SerializeField, Tooltip("言語選択画面の親パネル")]
-    private GameObject languageSelectPanel;
-
-    [SerializeField, Tooltip("日本語用確認画面の親パネル")]
-    private GameObject confirmPanelJP;
-
-    [SerializeField, Tooltip("英語用確認画面の親パネル")]
-    private GameObject confirmPanelEN;
+    [SerializeField] private GameObject startPromptPanel;
+    [SerializeField] private GameObject languageSelectPanel;
+    [SerializeField] private GameObject confirmPanelJP;
+    [SerializeField] private GameObject confirmPanelEN;
 
     // ---------------------------------------------------------
-    // 選択状態ハイライト（Selected画像）
+    // 選択状態ハイライト（Filled Imageとして設定すること）
     // ---------------------------------------------------------
     [Header("■ 言語選択ハイライト")]
-    [SerializeField, Tooltip("日本語選択時に表示する画像オブジェクト")]
-    private Image jpSelectedImage;
-    [SerializeField, Tooltip("英語選択時に表示する画像オブジェクト")]
-    private Image enSelectedImage;
+    [SerializeField] private Image jpSelectedImage;
+    [SerializeField] private Image enSelectedImage;
 
     [Header("■ 日本語確認用ハイライト")]
-    [SerializeField, Tooltip("日本語モード：『はい』選択時の画像")]
-    private Image jpYesImage;
-    [SerializeField, Tooltip("日本語モード：『いいえ』選択時の画像")]
-    private Image jpNoImage;
+    [SerializeField] private Image jpYesImage;
+    [SerializeField] private Image jpNoImage;
 
     [Header("■ 英語確認用ハイライト")]
-    [SerializeField, Tooltip("英語モード：『YES』選択時の画像")]
-    private Image enYesImage;
-    [SerializeField, Tooltip("英語モード：『NO』選択時の画像")]
-    private Image enNoImage;
+    [SerializeField] private Image enYesImage;
+    [SerializeField] private Image enNoImage;
 
     // ---------------------------------------------------------
-    // デバイス入力・感度設定
+    // 入力・操作設定
     // ---------------------------------------------------------
     [Header("■ デバイス入力設定")]
-    [SerializeField, Tooltip("M5StickCからの静電容量値がこの値を超えると『握った』と判定する")]
-    private int gripThreshold = 300;
+    [SerializeField] private int gripThreshold = 300;
+    [SerializeField] private float tiltThreshold = 15.0f;
+    [SerializeField] private bool invertTilt = false;
 
-    [SerializeField, Tooltip("デバイスをこの角度（度）以上傾けると左右選択とみなす")]
-    private float tiltThreshold = 15.0f;
-
-    [SerializeField, Tooltip("加速度センサの軸方向を反転させる場合に有効化")]
-    private bool invertTilt = false;
-
-    [Header("■ 操作感調整")]
-    [SerializeField, Tooltip("状態遷移後、次の入力を受け付けるまでのインターバル（秒）")]
-    private float stateChangeCooldown = 0.5f;
+    [Header("■ 長押し決定設定")]
+    [Tooltip("決定に必要な長押し時間（秒）")]
+    [SerializeField] private float holdDuration = 2.0f;
+    [Tooltip("状態遷移後の入力ブロック時間（秒）")]
+    [SerializeField] private float stateChangeCooldown = 0.5f;
 
     // 内部制御変数
     private SceneLoaderButton sceneLoaderButton;
     private bool isInputLocked = false;
+    private bool waitForRelease = false;    // 連打防止用フラグ
+    private float currentHoldTimer = 0f;    // 現在の長押し時間
+
     private bool isEnglishSelected = false; // 偽:日本語, 真:英語
     private bool isYesSelected = true;      // 選択カーソルの位置
 
-    /// <summary>
-    /// コンポーネントの初期化および初期状態のUI構築を行う。
-    /// </summary>
     private void Start()
     {
         sceneLoaderButton = GetComponent<SceneLoaderButton>();
-
-        // 全UI要素を現在のステートに基づきリセット
         UpdateVisuals();
     }
 
-    /// <summary>
-    /// フレーム毎の入力監視とステート更新のハンドリング。
-    /// </summary>
     private void Update()
     {
         if (isInputLocked) return;
 
+        // 1. 入力状態の取得
         bool isGripping = CheckGripInput();
 
+        // 2. 連打防止（Release Guard）チェック
+        if (waitForRelease)
+        {
+            if (isGripping)
+            {
+                // 手が離されるまで待機。
+                // 選択中であることを示すため、Fillは1（満タン）で維持する。
+                ResetHoldState();
+                return;
+            }
+            // 手が離されたらガード解除
+            waitForRelease = false;
+        }
+
+        // 3. 各ステートの処理
         switch (currentState)
         {
             case TitleState.WaitToStart:
-                if (isGripping) ChangeState(TitleState.SelectLanguage);
+                // 待機画面は「握った瞬間」に次へ遷移（即時反応）
+                if (isGripping)
+                {
+                    ChangeState(TitleState.SelectLanguage);
+                }
                 break;
 
             case TitleState.SelectLanguage:
-                HandleLanguageSelection();
-                if (isGripping) ChangeState(TitleState.ConfirmStart);
+                if (HandleLanguageSelection()) ResetHoldState();
+                ProcessHoldInteraction(() => ChangeState(TitleState.ConfirmStart), isGripping);
                 break;
 
             case TitleState.ConfirmStart:
-                HandleConfirmSelection();
-                if (isGripping)
-                {
-                    if (isYesSelected)
-                    {
-                        ChangeState(TitleState.Loading);
-                        sceneLoaderButton.LoadTargetScene();
-                    }
-                    else
-                    {
-                        // 「いいえ」選択時は言語選択へ戻る
-                        ChangeState(TitleState.SelectLanguage);
-                    }
-                }
+                if (HandleConfirmSelection()) ResetHoldState();
+                ProcessHoldInteraction(ExecuteConfirmAction, isGripping);
                 break;
+        }
+    }
+
+    // =========================================================
+    // 長押し・決定ロジック
+    // =========================================================
+
+    /// <summary>
+    /// 長押し判定と進行度に応じたUI更新を行う共通処理。
+    /// 未入力時はFill=1（選択中）、長押し中は0→1（チャージ）で推移する。
+    /// </summary>
+    /// <param name="onComplete">決定時のアクション</param>
+    /// <param name="isGripping">現在の入力状態</param>
+    private void ProcessHoldInteraction(System.Action onComplete, bool isGripping)
+    {
+        if (isGripping)
+        {
+            // 加算
+            currentHoldTimer += Time.deltaTime;
+
+            // 進行度の正規化 (0.0 - 1.0)
+            float progress = Mathf.Clamp01(currentHoldTimer / holdDuration);
+            UpdateFillAnimation(progress);
+
+            // 決定判定
+            if (currentHoldTimer >= holdDuration)
+            {
+                onComplete?.Invoke();
+
+                // 決定後は入力をリセットし、手を離すまでブロック
+                ResetHoldState();
+                waitForRelease = true;
+            }
+        }
+        else
+        {
+            // 離している間は「選択されている」ことを示すためFillを1にする
+            ResetHoldState();
+        }
+    }
+
+    /// <summary>
+    /// 長押しタイマーをリセットし、見た目を選択中状態（Fill=1）に戻す。
+    /// </summary>
+    private void ResetHoldState()
+    {
+        currentHoldTimer = 0f;
+        UpdateFillAnimation(1.0f);
+    }
+
+    /// <summary>
+    /// 現在アクティブな選択画像のFillAmountを更新する。
+    /// </summary>
+    private void UpdateFillAnimation(float fillAmount)
+    {
+        Image targetImage = GetCurrentActiveImage();
+        if (targetImage != null)
+        {
+            targetImage.fillAmount = fillAmount;
+        }
+    }
+
+    /// <summary>
+    /// 現在のステートと選択状況に基づいて、操作対象となるImageを特定する。
+    /// </summary>
+    private Image GetCurrentActiveImage()
+    {
+        switch (currentState)
+        {
+            case TitleState.WaitToStart:
+                return null;
+
+            case TitleState.SelectLanguage:
+                return isEnglishSelected ? enSelectedImage : jpSelectedImage;
+
+            case TitleState.ConfirmStart:
+                if (isEnglishSelected)
+                    return isYesSelected ? enYesImage : enNoImage;
+                else
+                    return isYesSelected ? jpYesImage : jpNoImage;
+
+            default:
+                return null;
+        }
+    }
+
+    private void ExecuteConfirmAction()
+    {
+        if (isYesSelected)
+        {
+            ChangeState(TitleState.Loading);
+            sceneLoaderButton.LoadTargetScene();
+        }
+        else
+        {
+            // 「いいえ」なら言語選択へ戻る
+            ChangeState(TitleState.SelectLanguage);
         }
     }
 
@@ -139,11 +219,9 @@ public class TitleFlowManager : MonoBehaviour
     // 入力インターフェース
     // =========================================================
 
-    /// <summary>
-    /// ハードウェア（M5StickC）またはキーボードからの握力入力を判定する。
-    /// </summary>
     private bool CheckGripInput()
     {
+        // デバッグ用キーボード入力
         if (Input.GetKey(KeyCode.Space)) return true;
 
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
@@ -154,10 +232,6 @@ public class TitleFlowManager : MonoBehaviour
         return false;
     }
 
-    /// <summary>
-    /// デバイスの傾きに基づく水平方向の入力を取得する。
-    /// </summary>
-    /// <returns>左入力時は負値、右入力時は正値</returns>
     private float GetHorizontalInput()
     {
         float key = Input.GetAxisRaw("Horizontal");
@@ -166,7 +240,6 @@ public class TitleFlowManager : MonoBehaviour
         if (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected)
         {
             Vector3 accel = ArduinoInputManager.RawAccel;
-            // 垂直・水平軸のAtan2により傾斜角を算出
             float angle = -Mathf.Atan2(accel.x, accel.y) * Mathf.Rad2Deg;
             if (invertTilt) angle *= -1;
 
@@ -177,20 +250,25 @@ public class TitleFlowManager : MonoBehaviour
     }
 
     // =========================================================
-    // ステート制御ロジック
+    // ステート制御ロジック（選択変更の検知）
     // =========================================================
 
-    private void HandleLanguageSelection()
+    private bool HandleLanguageSelection()
     {
         float input = GetHorizontalInput();
+        bool changed = false;
+
         if (input < -0.5f && isEnglishSelected)
         {
             ApplyLanguageChange(false);
+            changed = true;
         }
         else if (input > 0.5f && !isEnglishSelected)
         {
             ApplyLanguageChange(true);
+            changed = true;
         }
+        return changed;
     }
 
     private void ApplyLanguageChange(bool useEnglish)
@@ -204,19 +282,24 @@ public class TitleFlowManager : MonoBehaviour
         }
     }
 
-    private void HandleConfirmSelection()
+    private bool HandleConfirmSelection()
     {
         float input = GetHorizontalInput();
+        bool changed = false;
+
         if (input < -0.5f && !isYesSelected)
         {
             isYesSelected = true;
             UpdateVisuals();
+            changed = true;
         }
         else if (input > 0.5f && isYesSelected)
         {
             isYesSelected = false;
             UpdateVisuals();
+            changed = true;
         }
+        return changed;
     }
 
     private void ChangeState(TitleState newState)
@@ -224,57 +307,44 @@ public class TitleFlowManager : MonoBehaviour
         StartCoroutine(StateTransitionRoutine(newState));
     }
 
-    /// <summary>
-    /// 状態遷移時の入力ロックおよび後処理を管理するコルーチン。
-    /// レスポンス向上のため、入力検知後「即座に」描画を更新し、その後に待機時間を設ける。
-    /// </summary>
     private IEnumerator StateTransitionRoutine(TitleState newState)
     {
-        // 1. 先に入力をロックする
         isInputLocked = true;
-
-        // 2. 即座にステートと見た目を更新する
         currentState = newState;
 
-        // 状態遷移時にデフォルト位置（YES）へリセット
         if (newState == TitleState.ConfirmStart) isYesSelected = true;
 
-        // 画面切り替え実行
         UpdateVisuals();
 
-        // 3. 見た目が変わった後にクールダウン（0.5秒）を置く
+        // 遷移直後は入力をリセット（Fillは1にして選択中であることを示す）
+        ResetHoldState();
+
         yield return new WaitForSeconds(stateChangeCooldown);
 
-        // 4. 誤操作防止：物理的に手が離れるまで待機
-        while (CheckGripInput()) yield return null;
-
-        // ロック解除
+        // ※遷移直後の誤動作を防ぐため、一度手を離すまで入力を待機させる
         isInputLocked = false;
+        waitForRelease = true;
     }
 
     // =========================================================
-    // UIレンダリング・クリーンアップロジック
+    // UIレンダリング
     // =========================================================
 
-    /// <summary>
-    /// 現在のステート、選択言語、カーソル位置に基づき、全UI要素の表示状態を一括更新する。
-    /// </summary>
     private void UpdateVisuals()
     {
-        // 1. パネル自体の表示・非表示
-        if (startPromptPanel != null) startPromptPanel.SetActive(currentState == TitleState.WaitToStart);
-        if (languageSelectPanel != null) languageSelectPanel.SetActive(currentState == TitleState.SelectLanguage);
+        // 1. パネル表示切り替え
+        SetObjActive(startPromptPanel, currentState == TitleState.WaitToStart);
+        SetObjActive(languageSelectPanel, currentState == TitleState.SelectLanguage);
 
         bool isConfirm = (currentState == TitleState.ConfirmStart);
-        if (confirmPanelJP != null) confirmPanelJP.SetActive(isConfirm && !isEnglishSelected);
-        if (confirmPanelEN != null) confirmPanelEN.SetActive(isConfirm && isEnglishSelected);
+        SetObjActive(confirmPanelJP, isConfirm && !isEnglishSelected);
+        SetObjActive(confirmPanelEN, isConfirm && isEnglishSelected);
 
-        // 2. 言語選択ハイライトの更新（ステート外なら強制非表示）
+        // 2. 選択画像のアクティブ切り替え（非選択なら非表示）
         bool isLangSelect = (currentState == TitleState.SelectLanguage);
         SafeSetActive(jpSelectedImage, isLangSelect && !isEnglishSelected);
         SafeSetActive(enSelectedImage, isLangSelect && isEnglishSelected);
 
-        // 3. 確認画面ハイライトの更新（ステート外、または別言語なら強制非表示）
         bool isConfirmJP = (isConfirm && !isEnglishSelected);
         bool isConfirmEN = (isConfirm && isEnglishSelected);
 
@@ -282,16 +352,23 @@ public class TitleFlowManager : MonoBehaviour
         SafeSetActive(jpNoImage, isConfirmJP && !isYesSelected);
         SafeSetActive(enYesImage, isConfirmEN && isYesSelected);
         SafeSetActive(enNoImage, isConfirmEN && !isYesSelected);
+
+        // 切り替え直後は「選択中(Fill=1)」として表示する
+        UpdateFillAnimation(1.0f);
     }
 
-    /// <summary>
-    /// コンポーネントが未割当（Null）の場合を考慮した安全なSetActive処理。
-    /// </summary>
-    private void SafeSetActive(Graphic uiElement, bool active)
+    private void SetObjActive(GameObject obj, bool active)
     {
-        if (uiElement != null && uiElement.gameObject != null)
+        if (obj != null) obj.SetActive(active);
+    }
+
+    private void SafeSetActive(Image img, bool active)
+    {
+        if (img != null && img.gameObject != null)
         {
-            uiElement.gameObject.SetActive(active);
+            img.gameObject.SetActive(active);
+            // 非表示にする際はFillを0に戻しておく（次に表示された時の一瞬のチラつき防止）
+            if (!active) img.fillAmount = 0f;
         }
     }
 }
