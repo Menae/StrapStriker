@@ -76,6 +76,8 @@ public class PlayerController : MonoBehaviour
     public float validSwingThresholdVelocity = 30f;
     [Tooltip("スイングを止めてからステージが減少し始めるまでの猶予時間（秒）")]
     public float stageDecayTime = 1.0f;
+    [Tooltip("ステージ0（未チャージ）の状態で発射した際の基礎パワー")]
+    public float baseLaunchPower = 10f;
 
     [Header("■ 物理スイング設定 (旧モード用)")]
     [Tooltip("デバイスの傾きがスイングの力に変換される倍率")]
@@ -93,16 +95,12 @@ public class PlayerController : MonoBehaviour
     [Tooltip("パワーが自然減衰するレート")]
     public float swayDecayRate = 5f;
 
-    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-    // ここを変更しました：カーブを削除し、手動設定用の変数を追加
-    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
     [Header("■ アニメーション調整 (手動設定)")]
     [Tooltip("SwayTimeを 0.0 にしたい時の角度（実行中にログを見て数値を入力してください）")]
     public float swayAngleAtZero = -60f;
 
     [Tooltip("SwayTimeを 1.0 にしたい時の角度（実行中にログを見て数値を入力してください）")]
     public float swayAngleAtOne = 60f;
-    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 
     [Header("■ 発射・空中制御")]
     [Tooltip("パワーを発射速度に変換する倍率")]
@@ -783,6 +781,7 @@ public class PlayerController : MonoBehaviour
                 if (useDirectControl)
                 {
                     // DirectControlモード: ステージ数で判定
+                    // ※基礎パワーだけで飛びたい場合は、Inspectorで minStageToLaunch を 0 に設定してください
                     if (currentSwingStage < minStageToLaunch)
                     {
                         isPowerInsufficient = true;
@@ -856,7 +855,9 @@ public class PlayerController : MonoBehaviour
                     if (useDirectControl)
                     {
                         // DirectControl: ステージ数ベース
-                        launchForce = currentSwingStage * powerPerStage * launchMultiplier;
+                        // ■■ 改修箇所：基礎パワー(baseLaunchPower)を加算するように変更 ■■
+                        float totalPower = baseLaunchPower + (currentSwingStage * powerPerStage);
+                        launchForce = totalPower * launchMultiplier;
                     }
                     else
                     {
