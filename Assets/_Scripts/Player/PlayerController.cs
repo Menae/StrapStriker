@@ -62,6 +62,8 @@ public class PlayerController : MonoBehaviour
     public float swayMaxAngle = 60f;
     [Tooltip("直感操作時の追従スムージング速度")]
     public float directControlSmoothSpeed = 10f;
+    [Tooltip("上記の最大角度(swayMaxAngle)に到達するために必要な、手元の入力角度。\n例: ここを30に設定し、Maxを90にすると「30度振れば90度傾く(感度3倍)」となる。")]
+    public float swayAngleAtOne = 60f;
 
     [Header("▼ 勢いステージ設定")]
     [Tooltip("勢いの最大ステージ数")]
@@ -94,13 +96,6 @@ public class PlayerController : MonoBehaviour
     public float powerToSwingMultiplier = 0.1f;
     [Tooltip("パワーが自然減衰するレート")]
     public float swayDecayRate = 5f;
-
-    [Header("■ アニメーション調整 (手動設定)")]
-    [Tooltip("SwayTimeを 0.0 にしたい時の角度（実行中にログを見て数値を入力してください）")]
-    public float swayAngleAtZero = -60f;
-
-    [Tooltip("SwayTimeを 1.0 にしたい時の角度（実行中にログを見て数値を入力してください）")]
-    public float swayAngleAtOne = 60f;
 
     [Header("■ 発射・空中制御")]
     [Tooltip("パワーを発射速度に変換する倍率")]
@@ -456,85 +451,84 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// スイング中の演算を実行するメソッド。
-    /// キーボード入力とM5入力を「真下=270度」基準で統一して処理する。
+    /// スイング中の物理演算を実行する。
+    /// デバイス入力（M5StickC）またはキーボード入力を正規化し、プレイヤーの回転と勢い（ステージ）を計算する。
     /// </summary>
     private void ExecuteSwayingPhysics()
     {
-        // デバイス未接続かつデバッグモードOFFなら何もしない
+        // デバイス未接続かつデバッグモードOFF時は処理を中断
         bool isM5Connected = (ArduinoInputManager.instance != null && ArduinoInputManager.instance.IsConnected);
         if (!isM5Connected && !debugMode) return;
 
-        // =================================================================
-        // 1. デバイス角度(0～360度)の算出
-        //    目標：つり革を真下に垂らした状態 = 270.0度 になるようにする
-        // =================================================================
+        // ---------------------------------------------------------
+        // 1. 入力角度の算出 (真下=270度基準)
+        // ---------------------------------------------------------
+        float inputAngle = 270f;
 
-        float inputAngle = 270f; // デフォルトは真下
-
-        // --- A. キーボード入力 (デバッグ用) ---
         if (debugMode && !isM5Connected)
         {
-            // 右キー(正)入力で角度を減らす(時計回り)、左キー(負)で増やす(反時計回り)
+            // キーボード入力（デバッグ用）
             float input = Input.GetAxisRaw("Horizontal");
             inputAngle = 270f - (input * swayMaxAngle);
         }
-        // --- B. M5StickC入力 (本番用) ---
         else if (isM5Connected)
         {
+            // M5StickC 加速度センサー入力
             Vector3 rawAccel = ArduinoInputManager.RawAccel;
             float accelX = GetAxisValue(accelHorizontalAxis, rawAccel);
             float accelY = GetAxisValue(accelVerticalAxis, rawAccel);
 
-            // Atan2で角度算出 (右=0, 上=90, 左=180, 下=-90)
+            // 角度算出 (Atan2) と正規化 (0-360)
             float rawAngle = Mathf.Atan2(accelY, accelX) * Mathf.Rad2Deg;
-
-            // 0～360度に正規化
             if (rawAngle < 0f) rawAngle += 360f;
 
-            // 補正値を適用
+            // キャリブレーション補正の適用
             inputAngle = rawAngle + angleCalibrationOffset;
         }
 
-        // 最終的な正規化 (0～360)
+        // 0-360度に正規化
         inputAngle = Mathf.Repeat(inputAngle, 360f);
         currentDeviceAngle = inputAngle;
 
-        //★デバッグ用：このログが、キーボード操作なし/M5真下持ち の時に「270.0」になるのが正解
-        Debug.Log($"CurrentAngle: {currentDeviceAngle:F1} (Target: 270.0)");
+        // ---------------------------------------------------------
+        // 2. 変位量と感度の計算
+        // ---------------------------------------------------------
 
-        // =================================================================
-        // 2. 基準角度（270度）からの変位量を計算
-        //    DeltaAngleを使うことで、359度と1度の境目なども正しく計算できる
-        // =================================================================
-
+        // 基準角度(270度)からの偏差を算出
         float angleDifference = Mathf.DeltaAngle(0f, currentDeviceAngle);
 
+        // 入力感度の適用
+        // 設定された入力角度(swayAngleAtOne)で最大角度(swayMaxAngle)に到達するよう倍率を計算
+        float inputReference = (Mathf.Abs(swayAngleAtOne) > 0.1f) ? swayAngleAtOne : swayMaxAngle;
+        float sensitivity = swayMaxAngle / inputReference;
+
+        angleDifference *= sensitivity;
+
+        // 操作反転の適用
         if (invertDirectControl)
         {
             angleDifference *= -1f;
         }
 
-        // =================================================================
-        // 3. 姿勢制御と勢い計算 (共通ロジック)
-        // =================================================================
+        // ---------------------------------------------------------
+        // 3. 姿勢制御と勢い(ステージ)の更新
+        // ---------------------------------------------------------
         if (useDirectControl)
         {
-            // --- 姿勢制御 ---
-            // 角度制限 (SwayMaxAngle)
+            // 角度制限の適用
             float clampedDifference = Mathf.Clamp(angleDifference, -swayMaxAngle, swayMaxAngle);
 
-            // ターゲット角度を決定 (270度基準)
+            // ターゲット角度へ回転（スムージング適用）
             float targetAngle = 270f + clampedDifference;
-
-            // Rigidbodyを回転させる
             float currentZ = transform.eulerAngles.z;
             float newZ = Mathf.LerpAngle(currentZ, targetAngle, Time.fixedDeltaTime * directControlSmoothSpeed);
+
             rb.MoveRotation(newZ);
             rb.angularVelocity = 0f;
 
-            // --- 勢い（ステージ）判定 ---
-            // キーボード入力時は常に最大ステージとする（デバッグのしやすさ重視）
+            // --- 勢いステージ判定 ---
+
+            // キー入力時は常に最大ステージを維持（デバッグ用）
             bool isKeyInputActive = (debugMode && !isM5Connected && Mathf.Abs(Input.GetAxisRaw("Horizontal")) > 0.1f);
 
             if (isKeyInputActive)
@@ -544,13 +538,13 @@ public class PlayerController : MonoBehaviour
             }
             else
             {
-                // M5入力時のロジック
+                // 最大振れ幅の更新
                 if (Mathf.Abs(clampedDifference) > maxAmplitudeInCurrentSwing)
                 {
                     maxAmplitudeInCurrentSwing = Mathf.Abs(clampedDifference);
                 }
 
-                // 中心（差分0）をまたいだかどうか
+                // 中心点通過の判定
                 bool crossedCenter = (Mathf.Sign(lastAngleDifference) != Mathf.Sign(clampedDifference));
 
                 float currentAngularVelocity = 0f;
@@ -559,6 +553,7 @@ public class PlayerController : MonoBehaviour
                     currentAngularVelocity = Mathf.Abs(GetAxisValue(gyroRotationAxis, ArduinoInputManager.RawGyro));
                 }
 
+                // 中心通過時にスイングの有効性を判定し、ステージを加算
                 if (crossedCenter)
                 {
                     bool isValidSwing = (maxAmplitudeInCurrentSwing >= validSwingThresholdAngle) &&
@@ -569,7 +564,6 @@ public class PlayerController : MonoBehaviour
                         if (currentSwingStage < maxSwingStages)
                         {
                             currentSwingStage++;
-                            Debug.Log($"<color=cyan>Swing Stage UP!</color> Lv.{currentSwingStage}");
                         }
                         timeSinceLastValidSwing = 0f;
                     }
@@ -577,7 +571,7 @@ public class PlayerController : MonoBehaviour
                 }
             }
 
-            // 減衰処理
+            // ステージ減衰処理
             if (!isKeyInputActive)
             {
                 timeSinceLastValidSwing += Time.deltaTime;
@@ -585,11 +579,10 @@ public class PlayerController : MonoBehaviour
                 {
                     currentSwingStage--;
                     timeSinceLastValidSwing = 0f;
-                    Debug.Log($"<color=orange>Swing Stage Decay...</color> Lv.{currentSwingStage}");
                 }
             }
 
-            // ステージをSwayPowerに反映
+            // SwayPowerへの反映
             float stageRatio = (float)currentSwingStage / (float)maxSwingStages;
             swayPower = stageRatio * maxSwayPower;
 
@@ -597,43 +590,44 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        // =================================================================
-        // 4. PhysicsControl（旧物理スイングモード）
-        // =================================================================
-
+        // ---------------------------------------------------------
+        // 4. 物理トルク制御 (旧モード・DirectControl無効時)
+        // ---------------------------------------------------------
         float inputTorque = 0f;
         float gyroVelocity = 0f;
 
-        if (debugMode && (ArduinoInputManager.instance == null || !ArduinoInputManager.instance.IsConnected))
+        if (debugMode && !isM5Connected)
         {
+            // キーボードによる物理トルク操作
             float horizontalInput = Input.GetAxisRaw("Horizontal");
             if (Mathf.Abs(horizontalInput) > 0.1f)
             {
                 ChangeState(PlayerState.Swaying);
                 inputTorque = horizontalInput * swayForceByAngle;
-
-                // キー入力中はパワーを加算する
                 swayPower = Mathf.Min(maxSwayPower, swayPower + swayIncreaseRate * Time.fixedDeltaTime);
             }
             else
             {
-                // 入力がないときは減衰
                 swayPower = Mathf.Max(0, swayPower - swayDecayRate * Time.fixedDeltaTime);
             }
         }
         else
         {
+            // センサー入力による物理トルク操作
             gyroVelocity = GetAxisValue(gyroRotationAxis, ArduinoInputManager.RawGyro);
             float normalizedForce = Mathf.Clamp(angleDifference, -90f, 90f) / 90f;
 
             if (Mathf.Abs(normalizedForce) > 0.1f)
             {
                 ChangeState(PlayerState.Swaying);
+                // パワー蓄積に応じたトルク補正
                 inputTorque = normalizedForce * swayForceByAngle * (1f + swayPower * powerToSwingMultiplier);
             }
 
+            // 加速・減衰判定
             bool isAccelerating = (gyroVelocity > swingVelocityThreshold && normalizedForce > 0) ||
                                   (gyroVelocity < -swingVelocityThreshold && normalizedForce < 0);
+
             if (isAccelerating)
             {
                 swayPower = Mathf.Min(maxSwayPower, swayPower + swayIncreaseRate * Time.fixedDeltaTime);
@@ -644,11 +638,9 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        float inertiaTorque = 0f;
-        if (StageManager.CurrentInertia.x != 0)
-        {
-            inertiaTorque = StageManager.CurrentInertia.x * inertiaSwingBonus;
-        }
+        // 慣性力によるトルクボーナスの加算
+        float inertiaTorque = (StageManager.CurrentInertia.x != 0) ?
+                              StageManager.CurrentInertia.x * inertiaSwingBonus : 0f;
 
         float totalTorque = inputTorque + inertiaTorque;
         if (Mathf.Abs(totalTorque) > 0.01f)
