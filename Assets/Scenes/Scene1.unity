@@ -8313,8 +8313,8 @@ MonoBehaviour:
     m_Bits: 64
   groundCheckDistance: 0.2
   groundBrakingFactor: 0.1
-  debugMode: 1
-  useDirectControl: 0
+  debugMode: 0
+  useDirectControl: 1
   invertDirectControl: 0
 --- !u!61 &1082202013
 BoxCollider2D:
