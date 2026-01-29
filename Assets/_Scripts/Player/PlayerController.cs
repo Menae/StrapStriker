@@ -60,6 +60,8 @@ public class PlayerController : MonoBehaviour
     [Header("■ スイング挙動 (段階式 DirectControl)")]
     [Tooltip("スイングの最大角度制限（度数法）。この角度を超えないようにクランプされる。")]
     public float swayMaxAngle = 60f;
+    [Tooltip("最大角度(swayMaxAngle)に到達するために必要な入力角度。\n値を小さくするほど感度が高くなる（例: 30に設定すると、30度の入力で最大角度まで振れる）。")]
+    public float inputAngleForMaxSway = 30f;
     [Tooltip("直感操作時の追従スムージング速度")]
     public float directControlSmoothSpeed = 10f;
 
@@ -458,6 +460,7 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// スイング中の演算を実行するメソッド。
     /// キーボード入力とM5入力を「真下=270度」基準で統一して処理する。
+    /// 入力角度に対する感度増幅処理を含む。
     /// </summary>
     private void ExecuteSwayingPhysics()
     {
@@ -500,15 +503,27 @@ public class PlayerController : MonoBehaviour
         inputAngle = Mathf.Repeat(inputAngle, 360f);
         currentDeviceAngle = inputAngle;
 
-        //★デバッグ用：このログが、キーボード操作なし/M5真下持ち の時に「270.0」になるのが正解
         Debug.Log($"CurrentAngle: {currentDeviceAngle:F1} (Target: 270.0)");
 
         // =================================================================
-        // 2. 基準角度（270度）からの変位量を計算
-        //    DeltaAngleを使うことで、359度と1度の境目なども正しく計算できる
+        // 2. 基準角度からの変位量を計算し、感度を適用する
         // =================================================================
 
+        // 基準(0度)からのズレを計算
         float angleDifference = Mathf.DeltaAngle(0f, currentDeviceAngle);
+
+        // --- 感度適用の追加箇所 ---
+        // 「入力設定値(inputAngleForMaxSway)」で「最大角度(swayMaxAngle)」に到達するよう倍率を計算
+        // 例: 入力30度でMax60度を出したい場合 -> 60 / 30 = 2倍の感度
+        float sensitivity = 1.0f;
+        if (inputAngleForMaxSway > 0.1f)
+        {
+            sensitivity = swayMaxAngle / inputAngleForMaxSway;
+        }
+
+        // ズレ量に感度を乗算（小さな動きを大きくする）
+        angleDifference *= sensitivity;
+        // ------------------------
 
         if (invertDirectControl)
         {
