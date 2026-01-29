@@ -8035,6 +8035,9 @@ MonoBehaviour:
   overloadDuration: 10
   congestionBonusList:
   - minRate: 200
+    maxRate: 300
+    startStage: 2
+  - minRate: 300
     maxRate: 500
     startStage: 4
   defeatedBonusList:
@@ -11425,7 +11428,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   timeLimit: 60
-  gripThreshold: 2000
+  gripThreshold: 1500
   titleSceneName: TitleScreen
 --- !u!1001 &1597328802
 PrefabInstance:

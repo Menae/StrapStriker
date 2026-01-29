@@ -156,6 +156,7 @@ public class StageManager : MonoBehaviour
     public ParallaxController parallaxController;
     public DoorManager doorController;
     public GameOverUIController gameOverUI;
+    public SpeedLinesEffect speedLinesEffect;
 
     [Header("■ 評価基準")]
     public int rankThreshold2Stars = 10;
@@ -488,6 +489,7 @@ public class StageManager : MonoBehaviour
         }
 
         CurrentInertia = Vector2.zero;
+        if (speedLinesEffect != null) speedLinesEffect.Stop(); // 念のため停止
 
         foreach (var station in stationEvents)
         {
@@ -515,9 +517,13 @@ public class StageManager : MonoBehaviour
 
         yield return new WaitForSeconds(finalRunDuration);
 
+        // 終点到着シークエンス（減速）
         UpdateStationNameUI("終点 まもなく到着", "ARRIVING AT TERMINAL");
         SetStatusDisplay(StatusDisplayType.Decelerating);
         CurrentInertia = new Vector2(inertiaForce, 0);
+
+        // 減速エフェクト再生
+        if (speedLinesEffect != null) speedLinesEffect.PlayDeceleration();
 
         yield return new WaitForSeconds(delayBeforeSpawn);
         if (arrivalSound != null && arrivalSound.clip != null)
@@ -525,6 +531,9 @@ public class StageManager : MonoBehaviour
             audioSource.PlayOneShot(arrivalSound.clip, arrivalSound.volume);
         }
         StopBlinking();
+
+        // 到着・停止
+        if (speedLinesEffect != null) speedLinesEffect.Stop();
 
         yield return new WaitForSeconds(1.0f);
         TriggerStageClear();
@@ -535,9 +544,13 @@ public class StageManager : MonoBehaviour
         if (parallaxController != null)
             parallaxController.StartApproachingStation(station.stationBackgroundSprite);
 
+        // --- 減速パート ---
         UpdateStationNameUI($"まもなく {station.stationNameJP}", $"ARRIVING AT {station.stationNameEN}");
         SetStatusDisplay(StatusDisplayType.Decelerating);
         CurrentInertia = new Vector2(inertiaForce, 0);
+
+        // 減速エフェクト再生
+        if (speedLinesEffect != null) speedLinesEffect.PlayDeceleration();
 
         yield return new WaitForSeconds(delayBeforeSpawn);
 
@@ -549,7 +562,10 @@ public class StageManager : MonoBehaviour
 
         if (doorController != null) DoorManager.OpenAllDoors();
 
-        // スポーン処理
+        // --- 停車パート（NPCスポーン） ---
+        // エフェクト停止
+        if (speedLinesEffect != null) speedLinesEffect.Stop();
+
         int totalSpawned = 0;
         if (station.spawnWaves != null)
         {
@@ -563,9 +579,6 @@ public class StageManager : MonoBehaviour
         // 混雑率増加
         currentCongestionRate += totalSpawned * rateDecreasePerNpc;
 
-        // 即死判定を削除し、Update内のオーバーロード管理へ任せる
-        // if (currentCongestionRate >= maxCongestionRate) { ... } を削除済
-
         SetStatusDisplay(StatusDisplayType.Stopped);
         CurrentInertia = Vector2.zero;
 
@@ -573,13 +586,21 @@ public class StageManager : MonoBehaviour
 
         if (parallaxController != null) parallaxController.DepartFromStation();
 
+        // --- 発車・加速パート ---
         SetStatusDisplay(StatusDisplayType.Accelerating);
         CurrentInertia = new Vector2(-inertiaForce, 0);
 
+        // 加速エフェクト再生
+        if (speedLinesEffect != null) speedLinesEffect.PlayAcceleration();
+
         yield return new WaitForSeconds(accelerationTime);
 
+        // --- 定速走行パート ---
         SetStatusDisplay(StatusDisplayType.None);
         CurrentInertia = Vector2.zero;
+
+        // 加速終了に合わせてエフェクト停止
+        if (speedLinesEffect != null) speedLinesEffect.Stop();
     }
 
     private void TriggerStageClear()
