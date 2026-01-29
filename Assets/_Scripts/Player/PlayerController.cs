@@ -473,6 +473,21 @@ public class PlayerController : MonoBehaviour
         //    目標：つり革を真下に垂らした状態 = 270.0度 になるようにする
         // =================================================================
 
+        if (true)
+        {
+            // 生の加速度データ（重力がどこにかかっているか確認）
+            float accX = GetAxisValue(accelHorizontalAxis, ArduinoInputManager.RawAccel);
+            float accY = GetAxisValue(accelVerticalAxis, ArduinoInputManager.RawAccel);
+
+            // 基準(270)との差分（これが大きいと張り付く）
+            float rawDiff = Mathf.DeltaAngle(270f, currentDeviceAngle);
+
+            Debug.Log($"<color=yellow>[Angle Check]</color> " +
+                      $"Accel(X,Y):({accX:F2}, {accY:F2}) | " +  // 重力方向の確認
+                      $"Angle:{currentDeviceAngle:F1}° | " +     // 計算された角度
+                      $"Diff:{rawDiff:F1}°");                    // 基準(270)とのズレ
+        }
+
         float inputAngle = 270f; // デフォルトは真下
 
         // --- A. キーボード入力 (デバッグ用) ---
