@@ -555,7 +555,7 @@ public class PlayerController : MonoBehaviour
             // 角度制限 (SwayMaxAngle)
             float clampedDifference = Mathf.Clamp(angleDifference, -swayMaxAngle, swayMaxAngle);
 
-            // ターゲット角度を決定 (270度基準)
+            // ターゲット角度を決定
             float targetAngle = 0f + clampedDifference;
 
             // Rigidbodyを回転させる

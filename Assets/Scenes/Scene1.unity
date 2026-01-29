@@ -8319,7 +8319,7 @@ MonoBehaviour:
   groundBrakingFactor: 0.1
   debugMode: 0
   useDirectControl: 1
-  invertDirectControl: 0
+  invertDirectControl: 1
 --- !u!61 &1082202013
 BoxCollider2D:
   m_ObjectHideFlags: 0
